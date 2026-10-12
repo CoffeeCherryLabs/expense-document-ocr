@@ -108,7 +108,11 @@ export async function syncDrive(options:SyncOptions={}) {
   for(const file of files) {
     let record=byFile.get(file.id)
     const link=`https://drive.google.com/file/d/${file.id}/view`
-    if(!options.forceOcr && record && value(record,"Drive 수정시각")===file.modifiedTime && record.properties["OCR 상태"]?.select?.name!=="실패")continue
+    if(!options.forceOcr && record && value(record,"Drive 수정시각")===file.modifiedTime && record.properties["OCR 상태"]?.select?.name!=="실패"){
+      const links=record.properties["연결 지출"]?.relation??[]
+      if(links.length===1 && ledger.some(p=>p.id===links[0].id))drafts++
+      continue
+    }
     if(processed>=Number(process.env.MAX_FILES_PER_RUN??"20"))break
     processed++
     let attemptedCreate=false

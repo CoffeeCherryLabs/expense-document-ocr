@@ -34,10 +34,11 @@ jobs:
           EVIDENCE_DATA_SOURCE_ID: ${{ vars.EVIDENCE_DATA_SOURCE_ID }}
           TEST_DRIVE_FILE_ID: ${{ secrets.TEST_DRIVE_FILE_ID }}
           TEST_CARD_CLASSIFICATION: ${{ secrets.TEST_CARD_CLASSIFICATION }}
-          TEST_FORCE_OCR: 'true'
+          TEST_FORCE_OCR: 'false'
           MAX_FILES_PER_RUN: '1'
           DRIVE_ORGANIZE_ENABLED: 'false'
 
 # Recheck after receipt label normalization.
 # Require a linked draft and retain bounded private amount diagnostics on failure.
 # Recover horizontally aligned values from Vision word geometry.
+# Verify cached rerun keeps the single linked draft.
