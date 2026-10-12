@@ -1,6 +1,14 @@
 import {createHash} from "node:crypto"
 
 export type SummaryRow={id:string;properties:Record<string,any>}
+export function dashboardUpdates(parent:any,children:any[],labels:string[]) {
+  const blocks=[parent,...children].filter(b=>["paragraph","callout"].includes(b.type))
+  const plain=(b:any)=>(b[b.type].rich_text??[]).map((v:any)=>v.plain_text??v.text?.content??"").join("")
+  const prefixes=["전체 사용액","회계 처리 완료"]
+  const matched=prefixes.map(p=>blocks.filter(b=>plain(b).startsWith(p)))
+  if(matched.some(m=>m.length!==1))throw new Error("Dashboard summary layout changed: review configured block")
+  return matched.flatMap(([block],i)=>plain(block)===labels[i]?[]:[{id:block.id,body:{[block.type]:{rich_text:[{type:"text",text:{content:labels[i]},annotations:{bold:i===0}}]}}}])
+}
 export function dashboardTotals(rows:SummaryRow[]) {
   let total=0,completed=0,pending=0
   for(const {properties:p} of rows){

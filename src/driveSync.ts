@@ -6,7 +6,7 @@ import {reviewExpense, type ReviewInput} from "./review.js"
 import type {Extraction} from "./types.js"
 import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresentation.js"
 import {reportingProperties} from "./reporting.js"
-import {dailyGroups,summaryChanged,dashboardTotals} from "./dailySummary.js"
+import {dailyGroups,summaryChanged,dashboardTotals,dashboardUpdates} from "./dailySummary.js"
 
 type Row = {id:string; properties:Record<string,any>}
 type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
@@ -238,13 +238,10 @@ export async function syncDrive(options:SyncOptions={}) {
   }
   const dashboardBlockId=process.env.DASHBOARD_SUMMARY_BLOCK_ID
   if(!options.fileId && dashboardBlockId){
-    const blocks=await notion(`blocks/${dashboardBlockId}/children`)
-    const parts=blocks.results.filter((b:any)=>b.type==="paragraph")
-    const plain=(b:any)=>(b.paragraph.rich_text??[]).map((v:any)=>v.plain_text??v.text?.content??"").join("")
-    if(parts.length<2 || !plain(parts[0]).startsWith("전체 사용액") || !plain(parts[1]).startsWith("회계 처리 완료"))throw new Error("Dashboard summary layout changed: review configured block")
+    const parent=await notion(`blocks/${dashboardBlockId}`),blocks=await notion(`blocks/${dashboardBlockId}/children`)
     const totals=dashboardTotals(freshLedger),format=(n:number)=>n.toLocaleString("ko-KR")
     const labels=[`전체 사용액 ${format(totals.total)}원`,`회계 처리 완료 ${format(totals.completed)}원 · 미처리 ${format(totals.pending)}건`]
-    for(let i=0;i<2;i++)if(plain(parts[i])!==labels[i])await notion(`blocks/${parts[i].id}`,"PATCH",{paragraph:{rich_text:[{type:"text",text:{content:labels[i]},annotations:{bold:i===0}}]}})
+    for(const update of dashboardUpdates(parent,blocks.results,labels))await notion(`blocks/${update.id}`,"PATCH",update.body)
   }
   return {scanned:files.length,processed,failed,reviewed,organized,...(!options.fileId && summaryId?{summaryGroups,summaryUpdated}: {}),...(options.fileId?{drafts,cardMatches,ownerMatches}: {})}
 }
