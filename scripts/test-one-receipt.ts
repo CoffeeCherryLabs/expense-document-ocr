@@ -9,7 +9,7 @@ try {
   const result=await syncDrive({fileId,forceOcr:process.env.TEST_FORCE_OCR==="true",cardClassification:label==="non_corporate"?label:undefined,skipReviews:true})
   console.log(JSON.stringify(result))
   if(result.failed || result.drafts!==1)process.exitCode=1
-  if(label==="match_registered_card" && (result.cardMatches!==1 || result.ownerMatches!==1))process.exitCode=1
+  if((label==="match_registered_card" || process.env.TEST_REQUIRE_CARD_MATCH==="true") && (result.cardMatches!==1 || result.ownerMatches!==1))process.exitCode=1
 } catch {
   console.error("Single receipt test failed. Verify runtime credentials, folder access, data sources and Vision billing. No receipt content or credentials are logged.")
   process.exitCode=1

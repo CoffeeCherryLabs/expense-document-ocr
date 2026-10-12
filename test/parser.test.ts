@@ -29,6 +29,8 @@ test("letter-spaced payment labels and column totals preserve masked card uncert
   assert.equal(x.cardLast4,null)
   assert.equal(parseOcrText("결 제 금 액\n11,000원").totalAmount,11000)
   assert.equal(parseOcrText("결 제 금 액\n승인번호 12345678").totalAmount,null)
+  assert.equal(parseOcrText("카드번호 1234 - 56 ** - **** - 4321").cardLast4,"4321")
+  assert.equal(parseOcrText("카드번호 1234 - 5678 - **** - ****").cardLast4,null)
 })
 
 test("combines multiple pages in attachment order and parses fields across pages", () => {
