@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {syncDrive,transactionKey,conflicts} from "../src/driveSync.js"
 import {parseOcrText} from "../src/parser.js"
+import {AmbiguousMutationError} from "../src/remoteJson.js"
 const raw="상호: 테스트매장\n사업자등록번호: 123-45-67890\n거래일시 2026-10-07\n합계 11000원\n승인번호 12345678\n카드번호 1234-56**-****-4321"
 test("mobile card digits do not change transaction identity; amount conflicts do",()=>{const a=parseOcrText(raw);assert.equal(transactionKey(a),transactionKey({...a,cardLast4:"9999"}));assert.equal(conflicts(a,{...a,cardLast4:"9999"}),false);assert.equal(conflicts(a,{...a,totalAmount:12000}),true)})
 test("cloud intake is idempotent and changed evidence invalidates preliminary review",async()=>{
@@ -60,6 +61,26 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   assert.equal((await syncDrive({fileId:"file"})).processed,0)
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
  } finally {globalThis.fetch=oldFetch;for(const key of Object.keys(process.env))if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv)}
+})
+test("a lost ledger-create response stops before processing a second copy",async()=>{
+ const oldFetch=globalThis.fetch,oldEnv={...process.env};let downloads=0,ledgerCreates=0
+ Object.assign(process.env,{NOTION_API_TOKEN:"test",GOOGLE_CLIENT_ID:"test",GOOGLE_CLIENT_SECRET:"test",GOOGLE_REFRESH_TOKEN:"test",GOOGLE_CLOUD_API_KEY:"test",GOOGLE_DRIVE_FOLDER_ID:"folder",EXPENSE_DATA_SOURCE_ID:"ledger",EVIDENCE_DATA_SOURCE_ID:"inbox"})
+ const json=(x:unknown)=>new Response(JSON.stringify(x),{status:200})
+ globalThis.fetch=async(input,init)=>{
+  const url=String(input),body=typeof init?.body==="string"?JSON.parse(init.body):{}
+  if(url.includes("oauth2.googleapis.com"))return json({access_token:"test"})
+  if(url.includes("www.googleapis.com/drive/v3/files?"))return json({files:["a","b"].map(id=>({id,name:"receipt.png",mimeType:"image/png",modifiedTime:"v1",size:"8"}))})
+  if(url.includes("alt=media")){downloads++;return new Response("image")}
+  if(url.endsWith("/query"))return json({results:[],has_more:false})
+  if(url.includes("vision.googleapis.com"))return json({responses:[{fullTextAnnotation:{text:raw}}]})
+  if(url.endsWith("/pages") && init?.method==="POST"){
+   if(body.parent.data_source_id==="ledger"){ledgerCreates++;throw new Error("response lost after commit")}
+   return json({id:"evidence",properties:body.properties})
+  }
+  throw new Error("Unexpected additional mutation")
+ }
+ try{await assert.rejects(syncDrive(),AmbiguousMutationError);assert.equal(downloads,1);assert.equal(ledgerCreates,1)}
+ finally{globalThis.fetch=oldFetch;for(const key of Object.keys(process.env))if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv)}
 })
 test("empty Drive still refreshes daily projections and unchanged runs create nothing",async()=>{
  const oldFetch=globalThis.fetch,oldEnv={...process.env}

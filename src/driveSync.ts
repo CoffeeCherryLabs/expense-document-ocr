@@ -7,6 +7,7 @@ import type {Extraction} from "./types.js"
 import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresentation.js"
 import {reportingProperties} from "./reporting.js"
 import {dailyGroups,summaryChanged,dashboardTotals,dashboardUpdates} from "./dailySummary.js"
+import {jsonRequest,AmbiguousMutationError} from "./remoteJson.js"
 
 type Row = {id:string; properties:Record<string,any>}
 type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
@@ -14,16 +15,6 @@ const text = (s:string) => ({rich_text:Array.from({length:Math.ceil(s.length/190
 const value = (p:Row,k:string):string => (p.properties[k]?.rich_text??[]).map((x:any)=>x.plain_text??x.text?.content??"").join("")
 const required = (name:string) => {const v=process.env[name];if(!v)throw new Error(`Missing setting: ${name}`);return v}
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms))
-async function jsonRequest(url:string, init:RequestInit={}) {
-  // Only retry safe reads and query POSTs. Never blindly retry page creation after an unknown outcome.
-  const retrySafe = !init.method || init.method === "GET" || url.endsWith("/query")
-  for(let attempt=0;;attempt++) {
-    const r=await fetch(url,{...init,signal:AbortSignal.timeout(60000)})
-    if((r.status===429 || r.status>=500) && retrySafe && attempt<3){await sleep(Math.min(10000,1000*2**attempt));continue}
-    if(!r.ok)throw new Error(`Remote API ${new URL(url).hostname}: HTTP ${r.status}`)
-    return r.json() as Promise<any>
-  }
-}
 async function notion(path:string, method="GET", body?:unknown) {
   await sleep(350)
   return jsonRequest("https://api.notion.com/v1/"+path,{method,headers:{Authorization:`Bearer ${required("NOTION_API_TOKEN")}`,"Notion-Version":"2025-09-03","Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)})
@@ -187,6 +178,8 @@ export async function syncDrive(options:SyncOptions={}) {
       await notion(`pages/${record!.id}`,"PATCH",{properties})
       record!.properties={...record!.properties,...properties};hashes.set(hash,record!)
     } catch (error) {
+      // Stop all subsequent creates if the previous remote write has an unknown outcome.
+      if(error instanceof AmbiguousMutationError)throw error
       const message=error instanceof Error?error.message:""
       if(message==="No text detected in image" && record){
         const previousHash=value(record,"SHA256")
@@ -216,7 +209,7 @@ export async function syncDrive(options:SyncOptions={}) {
       try{
         const result=await organizeFile({token,root:required("GOOGLE_DRIVE_FOLDER_ID"),inbox:required("GOOGLE_DRIVE_UPLOAD_FOLDER_ID"),file,extraction:item.x,corroborated,audit:async event=>{await notion(`blocks/${item.p.id}/children`,"PATCH",{children:[{object:"block",type:"paragraph",paragraph:{rich_text:[{type:"text",text:{content:"Drive 정리 이력: "+JSON.stringify(event)}}]}}]})}})
         if(result.moved){organized++;await notion(`pages/${item.p.id}`,"PATCH",{properties:{"파일명":{title:[{text:{content:result.file.name}}]},"Drive 수정시각":text(result.file.modifiedTime)}})}
-      }catch{failed++}
+      }catch(error){if(error instanceof AmbiguousMutationError)throw error;failed++}
     }
   }
   const freshLedger=options.fileId?ledger:await rows(ledgerId)

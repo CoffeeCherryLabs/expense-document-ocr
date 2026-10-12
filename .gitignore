@@ -5,3 +5,9 @@ dist/
 workers.json
 *.log
 .DS_Store
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!config.example.tfvars
