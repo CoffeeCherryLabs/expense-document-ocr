@@ -21,6 +21,19 @@ test("parses a Korean card receipt", () => {
   assert.equal(actual.parserVersion, PARSER_VERSION)
 })
 
+test("letter-spaced payment labels and column totals preserve masked card uncertainty",()=>{
+  const x=parseOcrText("상호: 가상카페\n2026-10-01\n공 급 가 액\n부 가 세\n결 제 금 액\n10,000원\n1,000원\n11,000원\n카드번호 1234-5678-****-****\n승인번호 12345678")
+  assert.equal(x.totalAmount,11000)
+  assert.equal(x.supplyAmount,10000)
+  assert.equal(x.vatAmount,1000)
+  assert.equal(x.cardLast4,null)
+  assert.equal(parseOcrText("결 제 금 액\n11,000원").totalAmount,11000)
+  assert.equal(parseOcrText("결 제 금 액\n승인번호 12345678").totalAmount,null)
+  assert.equal(parseOcrText("카드번호 1234 - 56 ** - **** - 4321").cardLast4,"4321")
+  assert.equal(parseOcrText("카드번호 1234-56**_****-4321").cardLast4,"4321")
+  assert.equal(parseOcrText("카드번호 1234 - 5678 - **** - ****").cardLast4,null)
+})
+
 test("combines multiple pages in attachment order and parses fields across pages", () => {
   const combined = combineOcrPageTexts([receiptPage1, receiptPage2])
   assert.match(combined, /^--- page 1 ---/)

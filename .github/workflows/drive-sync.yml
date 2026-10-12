@@ -1,0 +1,38 @@
+name: Drive receipt intake
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: expense-drive-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: vars.EXPENSE_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check && npm test
+      - run: npm run sync-drive
+        env:
+          NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
+          GOOGLE_CLOUD_API_KEY: ${{ secrets.GOOGLE_CLOUD_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID }}
+          EXPENSE_DATA_SOURCE_ID: ${{ vars.EXPENSE_DATA_SOURCE_ID }}
+          EVIDENCE_DATA_SOURCE_ID: ${{ vars.EVIDENCE_DATA_SOURCE_ID }}
+          KNOWN_CARD_LAST4: ${{ secrets.KNOWN_CARD_LAST4 }}
+          KNOWN_CARD_USER_ID: ${{ secrets.KNOWN_CARD_USER_ID }}
+          MAX_FILES_PER_RUN: '20'
+          DRIVE_ORGANIZE_ENABLED: ${{ vars.DRIVE_ORGANIZE_ENABLED }}
+          GOOGLE_DRIVE_UPLOAD_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_UPLOAD_FOLDER_ID }}
