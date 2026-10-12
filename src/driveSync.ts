@@ -136,7 +136,8 @@ export async function syncDrive(options:SyncOptions={}) {
       const ocrLines=extraction.rawText.split(/\r?\n/)
       const amountLayout=extraction.totalAmount==null?ocrLines.flatMap((l,i)=>/결제금액|공급가액|부가세/.test(l.replace(/\s/g,""))?ocrLines.slice(i,i+8):[])
         .filter(l=>!/(?:카드|계좌)/.test(l) && !/\d{4}[- ]\d{4}[- ]/.test(l)).slice(0,24).map(l=>l.slice(0,100)):undefined
-      const structured={...extraction,rawText:"",...(amountLayout?.length?{amountLayout}: {})}
+      const cardLayout=extraction.cardLast4==null?ocrLines.flatMap((l,i)=>/카드번호/.test(l.replace(/\s/g,""))?ocrLines.slice(i,i+4):[]).slice(0,8).map(l=>l.replace(/\d/g,"#").slice(0,100)):undefined
+      const structured={...extraction,rawText:"",...(amountLayout?.length?{amountLayout}: {}),...(cardLayout?.length?{cardLayout}: {})}
       const changed=Boolean(priorHash && priorHash!==hash)
       const key=transactionKey(extraction), matches=key?byKey.get(key)??[]:[]
       const manualLinks=record!.properties["연결 지출"]?.relation??[]
