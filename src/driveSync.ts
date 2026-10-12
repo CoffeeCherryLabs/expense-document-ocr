@@ -6,6 +6,7 @@ import {reviewExpense, type ReviewInput} from "./review.js"
 import type {Extraction} from "./types.js"
 import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresentation.js"
 import {reportingProperties} from "./reporting.js"
+import {dailyGroups,summaryChanged} from "./dailySummary.js"
 
 type Row = {id:string; properties:Record<string,any>}
 type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
@@ -218,6 +219,21 @@ export async function syncDrive(options:SyncOptions={}) {
       }catch{failed++}
     }
   }
-  const reviewed=options.skipReviews || options.fileId?0:await reviewPending(await rows(ledgerId))
-  return {scanned:files.length,processed,failed,reviewed,organized,...(options.fileId?{drafts,cardMatches,ownerMatches}: {})}
+  const freshLedger=options.fileId?ledger:await rows(ledgerId)
+  const reviewed=options.skipReviews || options.fileId?0:await reviewPending(freshLedger)
+  let summaryGroups=0,summaryUpdated=0
+  const summaryId=process.env.DAILY_SUMMARY_DATA_SOURCE_ID
+  if(!options.fileId && summaryId){
+    const existing=await rows(summaryId),groups=dailyGroups(freshLedger),keys=new Set(groups.map(g=>g.key))
+    for(const group of groups){
+      const matches=existing.filter(p=>value(p,"집계키")===group.key)
+      if(matches.length>1)throw new Error("Duplicate daily summary keys: review projection")
+      if(!matches.length){await notion("pages","POST",{parent:{data_source_id:summaryId},properties:group.properties});summaryUpdated++}
+      else if(summaryChanged(matches[0],group.properties)){await notion(`pages/${matches[0].id}`,"PATCH",{properties:group.properties});summaryUpdated++}
+    }
+    // Only remove stale automation-owned projections, never source ledger entries.
+    for(const page of existing)if(value(page,"집계키").startsWith("daily-v1:") && !keys.has(value(page,"집계키"))){await notion(`pages/${page.id}`,"PATCH",{archived:true});summaryUpdated++}
+    summaryGroups=groups.length
+  }
+  return {scanned:files.length,processed,failed,reviewed,organized,...(!options.fileId && summaryId?{summaryGroups,summaryUpdated}: {}),...(options.fileId?{drafts,cardMatches,ownerMatches}: {})}
 }
