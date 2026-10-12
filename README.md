@@ -61,6 +61,10 @@ Drive 파일 정리 및 다른 지출의 검토 요청은 실행하지 않습니
 
 ## 클라우드 실행 설정
 
+Cloud Scheduler → Cloud Run Job 전환은 [설계·전환 절차](docs/CLOUD-SCHEDULER-MIGRATION.md)와
+[비활성 Terraform 초안](infra/cloud-scheduler/main.tf)에 준비했습니다. 아직 배포하지 않았습니다.
+새 배치의 자동 검토는 꺼두며 Drive 파일 정리도 비활성입니다. 기존 GitHub 실행기와 동시에 운영하지 않습니다.
+
 GitHub Actions 워크플로는 30분 간격으로 실행하도록 작성했으며 **기본 비활성**입니다. 배포 후에도 스케줄 지연이나 플랫폼 장애가 있을 수 있으며 즉시 실행/24시간 가용성 SLA를 보장하지 않습니다. 공개 저장소의 예약 실행 휴면 정책도 운영 시 확인하세요.
 
 GitHub repository Settings → Secrets and variables → Actions에 다음을 설정합니다. **실제 값은 코드·이슈·채팅에 넣지 않습니다.**
