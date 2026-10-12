@@ -75,3 +75,24 @@ test("evaluates exact expected fields", () => {
   assert.equal(result.score, 1)
   assert.equal(result.errors.length, 0)
 })
+
+test("Korean thousands periods retain won amounts without changing foreign decimals",()=>{
+  assert.equal(parseOcrText("합 계 금 액 32.000\n부가세 2.909\nKRW 원").totalAmount,32000)
+  assert.equal(parseOcrText("Total USD 32.50").totalAmount,32.5)
+  assert.equal(parseOcrText("실제 총 결제 금액 93,100원").totalAmount,93100)
+})
+
+test("payment card matching excludes loyalty cards and ambiguous hidden suffixes",()=>{
+  const x=parseOcrText("포인트 적립내역\n카드번호 1019-13**-****-0377\n신용카드 전표\n카드번호 1234-56**-****-4321")
+  assert.equal(x.cardLast4,"4321")
+  assert.equal(parseOcrText("포인트 적립내역\n카드번호 1019-13**-****-0377").cardLast4,null)
+  assert.equal(parseOcrText("신용카드\n카드번호 1234-5678-****-432*").cardLast4,null)
+  assert.equal(parseOcrText("카드번호 123456******4321").cardLast4,"4321")
+  assert.equal(parseOcrText("Payment method Mastercard - 4321").cardLast4,"4321")
+  assert.equal(parseOcrText("카드번호 1234-56**-****-4321\n카드번호 1234-56**-****-9999").cardLast4,null)
+})
+
+test("legal footer does not turn statements or payment receipts into tax invoices",()=>{
+  assert.equal(parseOcrText("거 래 명 세 표\n총 결제금액 11000원\n세금계산서와 같은 법적 효력은 없습니다.").documentType,"statement")
+  assert.equal(parseOcrText("결제정보\n합계금액 11000원\n세금계산서를 교부하지 않습니다.").documentType,"receipt")
+})

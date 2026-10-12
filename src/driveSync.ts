@@ -4,6 +4,7 @@ import {parseOcrText} from "./parser.js"
 import {extractTextFromImage} from "./googleVision.js"
 import {reviewExpense, type ReviewInput} from "./review.js"
 import type {Extraction} from "./types.js"
+import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresentation.js"
 
 type Row = {id:string; properties:Record<string,any>}
 type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
@@ -74,7 +75,7 @@ async function reviewPending(ledger:Row[]) {
   let reviewed=0
   for(const p of ledger)if(p.properties["검토 실행 요청"]?.checkbox===true){
     const result=reviewExpense(reviewInputFromRow(p))
-    await notion(`pages/${p.id}`,"PATCH",{properties:{"검토 결과":{select:{name:result.status}},"자동 검토 사유":text(result.issues.length?result.issues.map(i=>`${i.code}: ${i.message} (${i.basis})`).join("\n"):"설정된 사전검토 항목을 충족했습니다. 최종 결재·회계처리·RCMS 등록은 담당자가 진행하세요."),"적용 규정 버전":text(result.version),"자동 검토일":{date:{start:new Date().toISOString()}},"검토 실행 요청":{checkbox:false}}})
+    await notion(`pages/${p.id}`,"PATCH",{properties:{"검토 결과":{select:{name:result.status}},"자동 검토 사유":text(result.issues.length?result.issues.map(i=>`${i.code}: ${i.message} (${i.basis})`).join("\n"):"설정된 사전검토 항목을 충족했습니다. 최종 결재·회계처리·RCMS 등록은 담당자가 진행하세요."),"보완 안내":text(result.issues.length?result.issues.slice(0,3).map(i=>i.message).join(" "):"담당자: 사전검토를 마쳤습니다. 결재와 회계 처리를 진행하세요."),"적용 규정 버전":text(result.version),"자동 검토일":{date:{start:new Date().toISOString()}},"검토 실행 요청":{checkbox:false}}})
     reviewed++
   }
   return reviewed
@@ -87,11 +88,6 @@ function guessCategory(file:DriveFile,x:Extraction) {
   if(/카페|커피|식비|식사|춘담|포케|디벨로핑/.test(s))return "식비·회의비"
   return "기타"
 }
-function reportBlocks(x:Extraction,link:string,reason:string) {
-  const paragraph=(s:string)=>({object:"block",type:"paragraph",paragraph:{rich_text:[{type:"text",text:{content:s.slice(0,1900)}}]}})
-  return [paragraph("자동 접수 초안 · 최종 회계 승인 전"),paragraph(`판독: ${x.transactionDate??"날짜 미확정"} / ${x.merchant??"사용처 미확정"} / ${x.totalAmount??"금액 미확정"} ${x.currency??""}`),paragraph(reason),paragraph("보완: 업무 목적과 과제 관련성, 참가자 이름·소속·과제참여 여부를 속성에 입력한 뒤 사용자 확인을 체크하세요. 업로드 메모도 사용할 수 있습니다."),{object:"block",type:"bookmark",bookmark:{url:link}},paragraph("규정 근거와 가이드라인은 관리대장 상단에서 확인하세요. Drive 원본의 접근권한은 유지됩니다.")]
-}
-
 /** Run as a single scheduled job. Evidence pages are the durable checkpoints; no local state required. */
 export type SyncOptions = {fileId?:string; forceOcr?:boolean; cardClassification?:"non_corporate"; skipReviews?:boolean}
 export async function syncDrive(options:SyncOptions={}) {
@@ -161,7 +157,10 @@ export async function syncDrive(options:SyncOptions={}) {
           properties["결제 방식"]={select:{name:"기타"}}
           properties["카드 매칭 근거"]=text("사용자가 이 거래의 결제 카드를 비법인카드로 명시함. 카드 끝자리 추론 아님. 개인 선지급·정산 대상 여부는 미확정.")
         }
-        match=await notion("pages","POST",{parent:{data_source_id:ledgerId},properties,children:reportBlocks(extraction,link,reason)})
+        const guidance=completionGuidance(guessCategory(file,extraction),Boolean(payer))
+        properties["보완 안내"]=text(guidance)
+        if(payer){properties["결제 방식"]={select:{name:"법인카드"}};properties["결제 수단 명칭"]=text("등록 기명 법인카드")}
+        match=await notion("pages","POST",{parent:{data_source_id:ledgerId},properties,children:draftBlocks(extraction,link,reason,guidance)})
         byKey.set(key,[match!]);ledger.push(match!)
       }
       if(existingLink && extraction.totalAmount!=null && existingLink.properties["총 금액"]?.number!==extraction.totalAmount)note="연결 지출과 새 문서 금액이 다릅니다. 판매처·카드 금액을 보존하고 담당자가 대조하세요."
@@ -170,18 +169,19 @@ export async function syncDrive(options:SyncOptions={}) {
         if(match.properties["지출자"]?.people?.some((p:{id:string})=>p.id===payer))ownerMatches++
       }
       if(match)drafts++
-      const properties:Record<string,unknown>={"Drive 파일 ID":text(file.id),"원본 링크":{url:link},"Drive 수정시각":text(file.modifiedTime),"SHA256":text(hash),"판독 JSON":text(JSON.stringify(structured)),"OCR 상태":{select:{name:note?"확인 필요":"판독 완료"}},"오류":text(note)}
+      const action=evidenceActions(note,Boolean(match))
+      const properties:Record<string,unknown>={"확인 유형":{select:{name:action.type}},"조치 상태":{select:{name:action.state}},"처리 안내":text(action.guidance),"Drive 파일 ID":text(file.id),"원본 링크":{url:link},"Drive 수정시각":text(file.modifiedTime),"SHA256":text(hash),"판독 JSON":text(JSON.stringify(structured)),"OCR 상태":{select:{name:note?"확인 필요":"판독 완료"}},"오류":text(note)}
       // Preserve manual links. A changed original never silently relinks an approved record.
       if(match && !record!.properties["연결 지출"]?.relation?.length)properties["연결 지출"]={relation:[{id:match.id}]}
-      if(changed)for(const linked of record!.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"자동 검토 사유":text("연결된 Drive 원본 내용이 변경되었습니다. 기존 판독·승인 근거와 재대조가 필요합니다.")}})
+      if(changed)for(const linked of record!.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"보완 안내":text("담당자: 원본 증빙이 변경되었습니다. 기존 지출값과 변경된 원본을 다시 대조하세요."),"자동 검토 사유":text("연결된 Drive 원본 내용이 변경되었습니다. 기존 판독·승인 근거와 재대조가 필요합니다.")}})
       await notion(`pages/${record!.id}`,"PATCH",{properties})
       record!.properties={...record!.properties,...properties};hashes.set(hash,record!)
     } catch (error) {
       const message=error instanceof Error?error.message:""
       if(message==="No text detected in image" && record){
         const previousHash=value(record,"SHA256")
-        if(previousHash && currentHash && previousHash!==currentHash)for(const linked of record.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"자동 검토 사유":text("연결 증빙 내용이 변경되었고 문자가 검출되지 않았습니다. 원본을 다시 대조하세요.")}})
-        await notion(`pages/${record.id}`,"PATCH",{properties:{"OCR 상태":{select:{name:"확인 필요"}},"오류":text("문자 미검출: 현장·제품 참고 사진인지 확인하고 필요한 경우 지출에 수동 연결하세요. 같은 원본은 재판독하지 않습니다."),"Drive 수정시각":text(file.modifiedTime),...(currentHash?{"SHA256":text(currentHash)}:{})}})
+        if(previousHash && currentHash && previousHash!==currentHash)for(const linked of record.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"보완 안내":text("담당자: 변경된 원본에서 글자가 검출되지 않았습니다. 선명한 증빙을 확인하고 기존 지출을 대조하세요."),"자동 검토 사유":text("연결 증빙 내용이 변경되었고 문자가 검출되지 않았습니다. 원본을 다시 대조하세요.")}})
+        await notion(`pages/${record.id}`,"PATCH",{properties:{"확인 유형":{select:{name:"정보 보완"}},"조치 상태":{select:{name:"보완 대기"}},"처리 안내":text("글자가 검출되지 않았습니다. 참고 사진인지 확인하고 지출에 연결하거나 선명한 영수증을 추가하세요."),"OCR 상태":{select:{name:"확인 필요"}},"오류":text("문자 미검출: 현장·제품 참고 사진인지 확인하고 필요한 경우 지출에 수동 연결하세요. 같은 원본은 재판독하지 않습니다."),"Drive 수정시각":text(file.modifiedTime),...(currentHash?{"SHA256":text(currentHash)}:{})}})
         continue
       }
       failed++
@@ -189,7 +189,7 @@ export async function syncDrive(options:SyncOptions={}) {
       const status=message.match(/(?:HTTP |request failed: )(\d{3})/)?.[1]
       console.error(status?`Receipt processing failed: HTTP ${status}`:"Receipt processing failed: verify OCR format and configuration")
       if(!record && !attemptedCreate)record=await notion("pages","POST",{parent:{data_source_id:inboxId},properties:{"파일명":{title:[{text:{content:file.name.slice(0,150)}}]},"Drive 파일 ID":text(file.id),"원본 링크":{url:link}}})
-      if(record)await notion(`pages/${record.id}`,"PATCH",{properties:{"OCR 상태":{select:{name:"실패"}},"오류":text("파일 처리 실패: 연결 권한, Vision 설정, 파일 형식·크기를 확인하세요. 다음 실행에서 재시도합니다.")}})
+      if(record)await notion(`pages/${record.id}`,"PATCH",{properties:{"확인 유형":{select:{name:"OCR 보완"}},"조치 상태":{select:{name:"보완 대기"}},"처리 안내":text("자동 판독을 재시도합니다. 반복되면 운영 담당자에게 원본 파일과 연결 권한 확인을 요청하세요."),"OCR 상태":{select:{name:"실패"}},"오류":text("파일 처리 실패: 연결 권한, Vision 설정, 파일 형식·크기를 확인하세요. 다음 실행에서 재시도합니다.")}})
     }
   }
   // No receipt data, file IDs, or OAuth secrets in cloud logs.

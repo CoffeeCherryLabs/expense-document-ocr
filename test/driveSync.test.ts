@@ -32,6 +32,9 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   assert.equal(draft.properties["결제 방식"].select.name,"기타")
   assert.equal(draft.properties["지출자"],undefined)
   assert.match(draft.properties["카드 매칭 근거"].rich_text[0].text.content,/비법인카드/)
+  assert.match(draft.properties["보완 안내"].rich_text[0].text.content,/결제 수단/)
+  assert.equal(draft.children.some((b:any)=>b.type==="toggle"),true)
+  assert.equal(pages.find(p=>p.parent.data_source_id==="inbox").properties["조치 상태"].select.name,"정리 완료")
   assert.equal((await syncDrive({fileId:"file"})).processed,0)
   const matched=await syncDrive({fileId:"file",forceOcr:true})
   assert.equal(matched.processed,1)
@@ -48,6 +51,7 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   const expenses=pages.filter(p=>p.parent.data_source_id==="ledger")
   assert.equal(expenses.length,1)
   assert.equal(expenses[0].properties["검토 결과"].select.name,"보완 필요")
+  assert.match(expenses[0].properties["보완 안내"].rich_text[0].text.content,/원본 증빙이 변경/)
   assert.equal(expenses[0].properties["회계 검토 완료"],undefined)
   modified="v3";bytes="reference-photo";visionText=""
   const reference=await syncDrive({fileId:"file",forceOcr:true})
