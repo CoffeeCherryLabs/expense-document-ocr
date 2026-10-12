@@ -31,10 +31,33 @@ export function getEvidenceFileUrls(page: PageWithProperties): string[] {
   return files.map((file) => file.file?.url ?? file.external?.url).filter((url): url is string => Boolean(url))
 }
 
+export async function getPageEvidenceUrls(notion:Client,pageId:string,page:PageWithProperties):Promise<string[]> {
+  const urls=getEvidenceFileUrls(page)
+  if(urls.length)return urls
+  let cursor:string|undefined
+  do {
+    const result=await notion.blocks.children.list({block_id:pageId,page_size:100,start_cursor:cursor})
+    for(const block of result.results){
+      const b=block as unknown as Record<string,any>
+      if(["image","pdf","file"].includes(b.type)){
+        const url=b[b.type]?.file?.url??b[b.type]?.external?.url
+        if(url)urls.push(url)
+      }
+    }
+    cursor=result.has_more?result.next_cursor??undefined:undefined
+  }while(cursor)
+  return urls
+}
+
 export async function downloadFile(url: string): Promise<Uint8Array> {
-  const response = await fetch(url)
+  const parsed=new URL(url)
+  if(parsed.protocol!=="https:" || ![".amazonaws.com",".notion.so",".notionusercontent.com",".notion-static.com"].some(h=>parsed.hostname.endsWith(h)))throw new Error("Only attached Notion evidence URLs are allowed")
+  const response = await fetch(url,{redirect:"error",signal:AbortSignal.timeout(60000)})
   if (!response.ok) throw new Error(`Evidence download failed: ${response.status}`)
-  return new Uint8Array(await response.arrayBuffer())
+  if(Number(response.headers.get("content-length"))>15*1024*1024)throw new Error("Evidence exceeds 15MiB")
+  const bytes=new Uint8Array(await response.arrayBuffer())
+  if(bytes.length>15*1024*1024)throw new Error("Evidence exceeds 15MiB")
+  return bytes
 }
 
 export async function updateOcrStatus(notion: Client, pageId: string, status: string, error?: string) {
@@ -64,13 +87,15 @@ export async function applyExtraction(
   const properties: Record<string, unknown> = {}
   for (const [name, value] of Object.entries(candidate)) if (value !== undefined && (overwriteExisting || propertyIsEmpty(page.properties?.[name]))) properties[name] = value
   const hasWarnings = Boolean(processing?.warnings.length)
-  properties["OCR 상태"] = { select: { name: extraction.confidence >= 0.8 && !hasWarnings ? "완료" : "확인 필요" } }
+  properties["OCR 상태"] = { select: { name: "확인 필요" } }
   properties["OCR 신뢰도"] = { number: extraction.confidence }
-  properties["OCR 원문"] = richText(extraction.rawText)
+  // Do not persist full OCR: receipts can contain PANs and private delivery addresses.
+  properties["OCR 원문"] = richText("구조화된 판독값만 저장합니다. 전체 내용은 접근권한이 유지된 원본에서 확인하세요.")
   properties["OCR 추출 결과"] = richText(JSON.stringify({ ...extraction, rawText: undefined, processing }))
   properties["OCR 문서 유형"] = { select: { name: extraction.documentType } }
   properties["OCR 모델 버전"] = richText(extraction.parserVersion)
   properties["OCR 처리일"] = { date: { start: new Date().toISOString() } }
   properties["OCR 오류"] = hasWarnings ? richText(processing!.warnings.join(" | ")) : { rich_text: [] }
+  properties["OCR 실행 요청"] = { checkbox:false }
   await notion.pages.update({ page_id: pageId, properties: properties as never })
 }

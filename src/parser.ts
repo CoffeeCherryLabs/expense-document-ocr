@@ -1,6 +1,6 @@
 import type { DocumentType, Extraction } from "./types.js"
 
-export const PARSER_VERSION = "receipt-parser-v2"
+export const PARSER_VERSION = "receipt-parser-v3"
 const clean = (value: string) => value.replace(/\s+/g, " ").trim()
 const digits = (value: string) => Number(value.replace(/[^0-9.-]/g, ""))
 
@@ -16,10 +16,11 @@ function parseAmount(lines: string[], labels: RegExp[]): number | null {
   const value = labeledValue(lines, labels)
   if (!value) return null
   const parsed = digits(value)
-  return Number.isFinite(parsed) ? Math.abs(parsed) : null
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseDate(text: string): string | null {
+  text=text.replace(/(20\d{2}[.\/-]\d{2}[.\/-]\d{2})(\d{2}:\d{2})/g,"$1 $2")
   const patterns = [
     /\b(20\d{2})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\b/,
     /\b(\d{2})[.\/-]\s*(\d{1,2})[.\/-]\s*(\d{1,2})\b/,
@@ -30,7 +31,8 @@ function parseDate(text: string): string | null {
     if (!match) continue
     let year = Number(match[1]); if (year < 100) year += 2000
     const month = Number(match[2]); const day = Number(match[3])
-    if (month < 1 || month > 12 || day < 1 || day > 31) continue
+    const date = new Date(Date.UTC(year, month - 1, day))
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) continue
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
   }
   return null
@@ -51,15 +53,26 @@ function fallbackMerchant(lines: string[]): string | null {
 
 export function parseOcrText(rawText: string): Extraction {
   const lines = rawText.split(/\r?\n/).map(clean).filter(Boolean)
-  const merchant = labeledValue(lines, [/(?:상호|가맹점명|공급자|업체명)\s*[:：]?\s*(.+)$/i]) ?? fallbackMerchant(lines)
-  const totalAmount = parseAmount(lines, [/(?:총\s*금액|합\s*계|결제\s*금액|승인\s*금액|공급대가)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
+  const isCardStatement = /하나카드/.test(rawText) && /거래유형/.test(rawText) && /승인금액/.test(rawText)
+  const merchant = labeledValue(lines, [/^(?:상호|가맹점명|공급자|업체명)\s*[:：]\s*(.+)$/i, /\[매장명\]\s*(.+)/])
+    ?? lines.find(l=>/^\[.+(?:점|소|카페)\]$/.test(l))?.replace(/^\[|\]$/g, "")
+    ?? (isCardStatement ? lines.find((l,i)=>i>0 && /^[-\d,\s]+원$/.test(lines[i+1]??"")) ?? null : fallbackMerchant(lines))
+  const amountTable = rawText.match(/승인금액\s*\n매입금액\s*\n부가세[\s\S]*?\n(-?[\d, ]+)\s*원\s*\n/)
+  const receiptTable = rawText.match(/공급가\s*액\s*\n부가\s*세\s*\n결제금액\s*\n([\d, ]+)원\s*\n([\d, ]+)원\s*\n([\d, ]+)\s*원/)
+  const saleTable=rawText.match(/판매금액\s*:\s*\n부가세\s*:\s*\n승인금액\s*:\s*\n([\d, ]+)\s*\n([\d, ]+)\s*\n([\d, ]+)/)
+  const detailAmount=/상세내역/.test(rawText) ? rawText.match(/\n([\d, ]+)\s*원\s*\n\[사용자지정\]/) : null
+  const labeledNext=rawText.match(/(?:승인\s*금액|결제\s*금액)\s*:\s*\n(-?[\d, ]+)\s*원/)
+  const bracketAmount=rawText.match(/\[금액\]\s*([\d, ]+)\s*원/)
+  const totalAmount = parseAmount(lines, [/(?:총\s*금액|합\s*계|결제\s*금액|승인\s*금액|공급대가|Amount paid|Total)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
+    ?? (amountTable ? digits(amountTable[1]) : receiptTable ? digits(receiptTable[3]) : saleTable ? digits(saleTable[3]) : detailAmount ? digits(detailAmount[1]) : labeledNext ? digits(labeledNext[1]) : bracketAmount ? digits(bracketAmount[1]) : null)
   const supplyAmount = parseAmount(lines, [/(?:공급가액|공급\s*가액)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
   const vatAmount = parseAmount(lines, [/(?:부가세|부가가치세|VAT)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
-  const approvalNumber = labeledValue(lines, [/(?:승인번호|승인\s*No\.?|approval\s*(?:no|number))\s*[:：#]?\s*([A-Z0-9-]{4,})/i])
+  const approvalNumber = labeledValue(lines, [/(?:승인\s*번호|승인\s*No\.?|approval\s*(?:no|number))\s*[:：#]?\s*([0-9][0-9 ]{5,11})(?![0-9a-z])/i])?.replace(/\s/g,"")
+    ?? (/승인번호/.test(rawText) && lines.filter(l=>/^\d{8}$/.test(l)).length === 1 ? lines.find(l=>/^\d{8}$/.test(l))! : null)
   const businessNumber = labeledValue(lines, [/(?:사업자등록번호|사업자번호)\s*[:：]?\s*(\d{3}[- ]?\d{2}[- ]?\d{5})/i])?.replace(/\s/g, "") ?? null
-  const cardLast4 = labeledValue(lines, [/(?:카드번호|카드)\s*[:：]?\s*(?:[*Xx\d-]+[- ])?([0-9]{4})\b/i])
+  const cardLast4 = lines.map(l=>l.match(/(?:[\d*Xx]{4}-){3}(\d{4})(?!\d)/)?.[1]).find(Boolean) ?? null
   const transactionDate = parseDate(rawText)
-  const currency = /\bUSD\b|\$/i.test(rawText) ? "USD" : /\bCNY\b|RMB|¥/i.test(rawText) ? "CNY" : /\bJPY\b/i.test(rawText) ? "JPY" : /\bEUR\b|€/i.test(rawText) ? "EUR" : "KRW"
+  const currency = /\bUSD\b/i.test(rawText) ? "USD" : /\bCNY\b|RMB/i.test(rawText) ? "CNY" : /\bJPY\b/i.test(rawText) ? "JPY" : /\bEUR\b|€/i.test(rawText) ? "EUR" : /\bKRW\b|원|₩|￦/i.test(rawText) || /사업자등록번호|부가세/.test(rawText) ? "KRW" : null
   const core = [merchant, transactionDate, totalAmount]
   const confidence = Number((core.filter((value) => value !== null).length / core.length).toFixed(2))
   return { documentType: detectDocumentType(rawText), merchant, transactionDate, totalAmount, supplyAmount, vatAmount, approvalNumber, cardLast4, businessNumber, currency, rawText, confidence, parserVersion: PARSER_VERSION }
