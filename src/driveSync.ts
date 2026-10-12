@@ -116,12 +116,14 @@ export async function syncDrive(options:SyncOptions={}) {
     if(processed>=Number(process.env.MAX_FILES_PER_RUN??"20"))break
     processed++
     let attemptedCreate=false
+    let currentHash:string|undefined
     try {
       if(Number(file.size)>15*1024*1024)throw new Error("파일이 15MiB를 초과합니다. 수동 검토가 필요합니다.")
       const response=await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(60000)})
       if(!response.ok)throw new Error(`Drive download HTTP ${response.status}`)
       const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>15*1024*1024)throw new Error("파일 크기 초과")
       const hash=createHash("sha256").update(bytes).digest("hex")
+      currentHash=hash
       const identical=hashes.get(hash)
       // Adopt the initial local-import manifest by content hash once Drive is connected.
       if(!record && identical && !value(identical,"Drive 파일 ID"))record=identical
@@ -175,9 +177,15 @@ export async function syncDrive(options:SyncOptions={}) {
       await notion(`pages/${record!.id}`,"PATCH",{properties})
       record!.properties={...record!.properties,...properties};hashes.set(hash,record!)
     } catch (error) {
+      const message=error instanceof Error?error.message:""
+      if(message==="No text detected in image" && record){
+        const previousHash=value(record,"SHA256")
+        if(previousHash && currentHash && previousHash!==currentHash)for(const linked of record.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"자동 검토 사유":text("연결 증빙 내용이 변경되었고 문자가 검출되지 않았습니다. 원본을 다시 대조하세요.")}})
+        await notion(`pages/${record.id}`,"PATCH",{properties:{"OCR 상태":{select:{name:"확인 필요"}},"오류":text("문자 미검출: 현장·제품 참고 사진인지 확인하고 필요한 경우 지출에 수동 연결하세요. 같은 원본은 재판독하지 않습니다."),"Drive 수정시각":text(file.modifiedTime),...(currentHash?{"SHA256":text(currentHash)}:{})}})
+        continue
+      }
       failed++
       // Log only status codes and our fixed error categories, never upstream bodies or receipt text.
-      const message=error instanceof Error?error.message:""
       const status=message.match(/(?:HTTP |request failed: )(\d{3})/)?.[1]
       console.error(status?`Receipt processing failed: HTTP ${status}`:"Receipt processing failed: verify OCR format and configuration")
       if(!record && !attemptedCreate)record=await notion("pages","POST",{parent:{data_source_id:inboxId},properties:{"파일명":{title:[{text:{content:file.name.slice(0,150)}}]},"Drive 파일 ID":text(file.id),"원본 링크":{url:link}}})
