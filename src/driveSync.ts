@@ -5,6 +5,7 @@ import {extractTextFromImage} from "./googleVision.js"
 import {reviewExpense, type ReviewInput} from "./review.js"
 import type {Extraction} from "./types.js"
 import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresentation.js"
+import {reportingProperties} from "./reporting.js"
 
 type Row = {id:string; properties:Record<string,any>}
 type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
@@ -97,6 +98,13 @@ export async function syncDrive(options:SyncOptions={}) {
   const files=options.fileId?allFiles.filter(f=>f.id===options.fileId):allFiles
   if(options.fileId && files.length!==1)throw new Error("Selected receipt is not in the configured Drive folder")
   const evidence=await rows(inboxId), ledger=await rows(ledgerId)
+  // Keep chart groups current after a person changes a date or payment method.
+  // These derived fields do not alter receipt values or approval state.
+  if(!options.fileId)for(const page of ledger){
+    const properties=reportingProperties(page.properties["사용일"]?.date?.start,page.properties["결제 방식"]?.select?.name)
+    if(Object.entries(properties).some(([key,val])=>page.properties[key]?.select?.name!==val.select.name))
+      await notion(`pages/${page.id}`,"PATCH",{properties})
+  }
   const byFile=new Map(evidence.map(p=>[value(p,"Drive 파일 ID"),p]))
   const byKey=new Map<string,Row[]>();for(const p of ledger){const k=value(p,"거래 식별키");if(k)byKey.set(k,[...(byKey.get(k)??[]),p])}
   const hashes=new Map(evidence.filter(p=>value(p,"SHA256")).map(p=>[value(p,"SHA256"),p]))
@@ -160,6 +168,7 @@ export async function syncDrive(options:SyncOptions={}) {
         const guidance=completionGuidance(guessCategory(file,extraction),Boolean(payer))
         properties["보완 안내"]=text(guidance)
         if(payer){properties["결제 방식"]={select:{name:"법인카드"}};properties["결제 수단 명칭"]=text("등록 기명 법인카드")}
+        Object.assign(properties,reportingProperties(extraction.transactionDate,(properties["결제 방식"] as any)?.select?.name))
         match=await notion("pages","POST",{parent:{data_source_id:ledgerId},properties,children:draftBlocks(extraction,link,reason,guidance)})
         byKey.set(key,[match!]);ledger.push(match!)
       }
