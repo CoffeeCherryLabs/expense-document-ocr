@@ -1,6 +1,6 @@
 import type { DocumentType, Extraction } from "./types.js"
 
-export const PARSER_VERSION = "receipt-parser-v3"
+export const PARSER_VERSION = "receipt-parser-v4"
 const clean = (value: string) => value.replace(/\s+/g, " ").trim()
 const digits = (value: string) => Number(value.replace(/[^0-9.-]/g, ""))
 
@@ -52,21 +52,33 @@ function fallbackMerchant(lines: string[]): string | null {
 }
 
 export function parseOcrText(rawText: string): Extraction {
-  const lines = rawText.split(/\r?\n/).map(clean).filter(Boolean)
+  // Printed receipt labels often contain letter spacing. Normalize labels only,
+  // preserving line boundaries and unrelated values (card numbers included).
+  const normalized=rawText.replace(/공[ \t]*급[ \t]*가[ \t]*액/g,"공급가액")
+    .replace(/부[ \t]*가[ \t]*세/g,"부가세")
+    .replace(/결[ \t]*제[ \t]*금[ \t]*액/g,"결제금액")
+    .replace(/승[ \t]*인[ \t]*금[ \t]*액/g,"승인금액")
+  const lines = normalized.split(/\r?\n/).map(clean).filter(Boolean)
   const isCardStatement = /하나카드/.test(rawText) && /거래유형/.test(rawText) && /승인금액/.test(rawText)
   const merchant = labeledValue(lines, [/^(?:상호|가맹점명|공급자|업체명)\s*[:：]\s*(.+)$/i, /\[매장명\]\s*(.+)/])
     ?? lines.find(l=>/^\[.+(?:점|소|카페)\]$/.test(l))?.replace(/^\[|\]$/g, "")
     ?? (isCardStatement ? lines.find((l,i)=>i>0 && /^[-\d,\s]+원$/.test(lines[i+1]??"")) ?? null : fallbackMerchant(lines))
   const amountTable = rawText.match(/승인금액\s*\n매입금액\s*\n부가세[\s\S]*?\n(-?[\d, ]+)\s*원\s*\n/)
-  const receiptTable = rawText.match(/공급가\s*액\s*\n부가\s*세\s*\n결제금액\s*\n([\d, ]+)원\s*\n([\d, ]+)원\s*\n([\d, ]+)\s*원/)
+  const receiptTable = normalized.match(/공급가액\s*\n부가세\s*\n결제금액\s*\n([\d, ]+)\s*원\s*\n([\d, ]+)\s*원\s*\n([\d, ]+)\s*원/)
   const saleTable=rawText.match(/판매금액\s*:\s*\n부가세\s*:\s*\n승인금액\s*:\s*\n([\d, ]+)\s*\n([\d, ]+)\s*\n([\d, ]+)/)
   const detailAmount=/상세내역/.test(rawText) ? rawText.match(/\n([\d, ]+)\s*원\s*\n\[사용자지정\]/) : null
   const labeledNext=rawText.match(/(?:승인\s*금액|결제\s*금액)\s*:\s*\n(-?[\d, ]+)\s*원/)
   const bracketAmount=rawText.match(/\[금액\]\s*([\d, ]+)\s*원/)
+  const pairedAmount=(label:string):number|null=>{
+    const index=lines.findIndex(l=>l.replace(/\s/g,"").replace(/[:：]$/,"")===label)
+    const next=lines[index+1]
+    return index>=0 && next && /^-?[\d, ]+\s*원?$/.test(next)?digits(next):null
+  }
   const totalAmount = parseAmount(lines, [/(?:총\s*금액|합\s*계|결제\s*금액|승인\s*금액|공급대가|Amount paid|Total)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
     ?? (amountTable ? digits(amountTable[1]) : receiptTable ? digits(receiptTable[3]) : saleTable ? digits(saleTable[3]) : detailAmount ? digits(detailAmount[1]) : labeledNext ? digits(labeledNext[1]) : bracketAmount ? digits(bracketAmount[1]) : null)
-  const supplyAmount = parseAmount(lines, [/(?:공급가액|공급\s*가액)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
-  const vatAmount = parseAmount(lines, [/(?:부가세|부가가치세|VAT)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i])
+    ?? pairedAmount("결제금액") ?? pairedAmount("승인금액")
+  const supplyAmount = parseAmount(lines, [/(?:공급가액|공급\s*가액)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i]) ?? (receiptTable?digits(receiptTable[1]):pairedAmount("공급가액"))
+  const vatAmount = parseAmount(lines, [/(?:부가세|부가가치세|VAT)\s*[:：]?\s*([₩￦\w\s,.-]*\d[\d,.-]*)/i]) ?? (receiptTable?digits(receiptTable[2]):pairedAmount("부가세"))
   const approvalNumber = labeledValue(lines, [/(?:승인\s*번호|승인\s*No\.?|approval\s*(?:no|number))\s*[:：#]?\s*([0-9][0-9 ]{5,11})(?![0-9a-z])/i])?.replace(/\s/g,"")
     ?? (/승인번호/.test(rawText) && lines.filter(l=>/^\d{8}$/.test(l)).length === 1 ? lines.find(l=>/^\d{8}$/.test(l))! : null)
   const businessNumber = labeledValue(lines, [/(?:사업자등록번호|사업자번호)\s*[:：]?\s*(\d{3}[- ]?\d{2}[- ]?\d{5})/i])?.replace(/\s/g, "") ?? null

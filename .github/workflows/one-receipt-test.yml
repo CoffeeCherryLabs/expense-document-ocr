@@ -37,3 +37,5 @@ jobs:
           TEST_FORCE_OCR: 'true'
           MAX_FILES_PER_RUN: '1'
           DRIVE_ORGANIZE_ENABLED: 'false'
+
+# Recheck after receipt label normalization.
