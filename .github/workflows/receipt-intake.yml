@@ -1,8 +1,8 @@
-name: Drive receipt intake
+name: Receipt intake and reporting
 on:
   workflow_dispatch:
   schedule:
-    - cron: '13,43 * * * *'
+    - cron: '3,33 * * * *'
 permissions:
   contents: read
 concurrency:
