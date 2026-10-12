@@ -39,3 +39,4 @@ jobs:
           DRIVE_ORGANIZE_ENABLED: 'false'
 
 # Recheck after receipt label normalization.
+# Require a linked draft and retain bounded private amount diagnostics on failure.

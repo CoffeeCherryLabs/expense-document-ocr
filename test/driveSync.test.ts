@@ -26,7 +26,7 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   assert.equal(pages.length,0)
   process.env.DRIVE_ORGANIZE_ENABLED="true"
   const first=await syncDrive({fileId:"file",cardClassification:"non_corporate"})
-  assert.deepEqual(first,{scanned:1,processed:1,failed:0,reviewed:0,organized:0})
+  assert.deepEqual(first,{scanned:1,processed:1,failed:0,reviewed:0,organized:0,drafts:1})
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
   const draft=pages.find(p=>p.parent.data_source_id==="ledger")
   assert.equal(draft.properties["결제 방식"].select.name,"기타")

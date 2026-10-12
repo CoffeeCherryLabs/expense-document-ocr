@@ -8,7 +8,7 @@ if(label && label!=="non_corporate")throw new Error("Unsupported transaction lab
 try {
   const result=await syncDrive({fileId,forceOcr:process.env.TEST_FORCE_OCR==="true",cardClassification:label as "non_corporate"|undefined,skipReviews:true})
   console.log(JSON.stringify(result))
-  if(result.failed)process.exitCode=1
+  if(result.failed || result.drafts!==1)process.exitCode=1
 } catch {
   console.error("Single receipt test failed. Verify runtime credentials, folder access, data sources and Vision billing. No receipt content or credentials are logged.")
   process.exitCode=1

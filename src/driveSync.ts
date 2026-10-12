@@ -104,7 +104,7 @@ export async function syncDrive(options:SyncOptions={}) {
   const byFile=new Map(evidence.map(p=>[value(p,"Drive 파일 ID"),p]))
   const byKey=new Map<string,Row[]>();for(const p of ledger){const k=value(p,"거래 식별키");if(k)byKey.set(k,[...(byKey.get(k)??[]),p])}
   const hashes=new Map(evidence.filter(p=>value(p,"SHA256")).map(p=>[value(p,"SHA256"),p]))
-  let processed=0, failed=0
+  let processed=0, failed=0, drafts=0
   for(const file of files) {
     let record=byFile.get(file.id)
     const link=`https://drive.google.com/file/d/${file.id}/view`
@@ -128,7 +128,10 @@ export async function syncDrive(options:SyncOptions={}) {
       if(!options.forceOcr && identical && value(identical,"판독 JSON"))extraction=JSON.parse(value(identical,"판독 JSON"))
       else extraction=parseOcrText(await extractTextFromImage(bytes))
       // Raw OCR can include personal addresses or card PAN; retain only structured, limited fields.
-      const structured={...extraction,rawText:""}
+      const ocrLines=extraction.rawText.split(/\r?\n/)
+      const amountLayout=extraction.totalAmount==null?ocrLines.flatMap((l,i)=>/결제금액|공급가액|부가세/.test(l.replace(/\s/g,""))?ocrLines.slice(i,i+8):[])
+        .filter(l=>!/(?:카드|계좌)/.test(l) && !/\d{4}[- ]\d{4}[- ]/.test(l)).slice(0,24).map(l=>l.slice(0,100)):undefined
+      const structured={...extraction,rawText:"",...(amountLayout?.length?{amountLayout}: {})}
       const changed=Boolean(priorHash && priorHash!==hash)
       const key=transactionKey(extraction), matches=key?byKey.get(key)??[]:[]
       const manualLinks=record!.properties["연결 지출"]?.relation??[]
@@ -155,6 +158,7 @@ export async function syncDrive(options:SyncOptions={}) {
         byKey.set(key,[match!]);ledger.push(match!)
       }
       if(existingLink && extraction.totalAmount!=null && existingLink.properties["총 금액"]?.number!==extraction.totalAmount)note="연결 지출과 새 문서 금액이 다릅니다. 판매처·카드 금액을 보존하고 담당자가 대조하세요."
+      if(match)drafts++
       const properties:Record<string,unknown>={"Drive 파일 ID":text(file.id),"원본 링크":{url:link},"Drive 수정시각":text(file.modifiedTime),"SHA256":text(hash),"판독 JSON":text(JSON.stringify(structured)),"OCR 상태":{select:{name:note?"확인 필요":"판독 완료"}},"오류":text(note)}
       // Preserve manual links. A changed original never silently relinks an approved record.
       if(match && !record!.properties["연결 지출"]?.relation?.length)properties["연결 지출"]={relation:[{id:match.id}]}
@@ -189,5 +193,5 @@ export async function syncDrive(options:SyncOptions={}) {
     }
   }
   const reviewed=options.skipReviews || options.fileId?0:await reviewPending(await rows(ledgerId))
-  return {scanned:files.length,processed,failed,reviewed,organized}
+  return {scanned:files.length,processed,failed,reviewed,organized,...(options.fileId?{drafts}: {})}
 }
