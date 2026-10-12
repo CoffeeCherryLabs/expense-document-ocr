@@ -93,9 +93,13 @@ function reportBlocks(x:Extraction,link:string,reason:string) {
 }
 
 /** Run as a single scheduled job. Evidence pages are the durable checkpoints; no local state required. */
-export async function syncDrive() {
+export type SyncOptions = {fileId?:string; forceOcr?:boolean; cardClassification?:"non_corporate"; skipReviews?:boolean}
+export async function syncDrive(options:SyncOptions={}) {
+  if(options.cardClassification && !options.fileId)throw new Error("Card classification requires one explicit file")
   const ledgerId=required("EXPENSE_DATA_SOURCE_ID"), inboxId=required("EVIDENCE_DATA_SOURCE_ID")
-  const token=await googleToken(), files=await listFolder(token,required("GOOGLE_DRIVE_FOLDER_ID"))
+  const token=await googleToken(), allFiles=await listFolder(token,required("GOOGLE_DRIVE_FOLDER_ID"))
+  const files=options.fileId?allFiles.filter(f=>f.id===options.fileId):allFiles
+  if(options.fileId && files.length!==1)throw new Error("Selected receipt is not in the configured Drive folder")
   const evidence=await rows(inboxId), ledger=await rows(ledgerId)
   const byFile=new Map(evidence.map(p=>[value(p,"Drive 파일 ID"),p]))
   const byKey=new Map<string,Row[]>();for(const p of ledger){const k=value(p,"거래 식별키");if(k)byKey.set(k,[...(byKey.get(k)??[]),p])}
@@ -104,7 +108,7 @@ export async function syncDrive() {
   for(const file of files) {
     let record=byFile.get(file.id)
     const link=`https://drive.google.com/file/d/${file.id}/view`
-    if(record && value(record,"Drive 수정시각")===file.modifiedTime && record.properties["OCR 상태"]?.select?.name!=="실패")continue
+    if(!options.forceOcr && record && value(record,"Drive 수정시각")===file.modifiedTime && record.properties["OCR 상태"]?.select?.name!=="실패")continue
     if(processed>=Number(process.env.MAX_FILES_PER_RUN??"20"))break
     processed++
     let attemptedCreate=false
@@ -121,7 +125,7 @@ export async function syncDrive() {
       byFile.set(file.id,record!)
       const priorHash=value(record!,"SHA256")
       let extraction:Extraction
-      if(identical && value(identical,"판독 JSON"))extraction=JSON.parse(value(identical,"판독 JSON"))
+      if(!options.forceOcr && identical && value(identical,"판독 JSON"))extraction=JSON.parse(value(identical,"판독 JSON"))
       else extraction=parseOcrText(await extractTextFromImage(bytes))
       // Raw OCR can include personal addresses or card PAN; retain only structured, limited fields.
       const structured={...extraction,rawText:""}
@@ -137,12 +141,16 @@ export async function syncDrive() {
       if(!key)note ||= "날짜·승인번호·사용처·금액·통화 중 미확정 항목이 있습니다. 연결 지출을 직접 선택하세요."
       if(changed)match=undefined
       if(!match && key && !changed && !collision && matches.length===0) {
-        const payer=extraction.cardLast4===process.env.KNOWN_CARD_LAST4?process.env.KNOWN_CARD_USER_ID:undefined
+        const payer=!options.cardClassification && extraction.cardLast4===process.env.KNOWN_CARD_LAST4?process.env.KNOWN_CARD_USER_ID:undefined
         const review=reviewExpense({funding:"unknown",date:extraction.transactionDate??undefined,amount:extraction.totalAmount,currency:extraction.currency??undefined,payer})
         const reason=review.issues.map(i=>`${i.code}: ${i.message}`).join("\n")
         const properties:Record<string,unknown>={"건명":{title:[{text:{content:`${extraction.transactionDate} ${extraction.merchant} ${extraction.totalAmount}원`.slice(0,150)}}]},"거래 식별키":text(key),"사용처":text(extraction.merchant!),"총 금액":{number:extraction.totalAmount},"카드 승인금액":{number:extraction.totalAmount},"사용일":{date:{start:extraction.transactionDate}},"승인·이체 확인번호":text(extraction.approvalNumber!),"통화":{select:{name:extraction.currency}},"Drive 원본 링크":text(link),"재원 구분":{select:{name:"연구과제 미지정"}},"검토 결과":{select:{name:review.status}},"자동 검토 사유":text(reason),"적용 규정 버전":text(review.version),"처리 상태":{status:{name:"작성 중"}},"OCR 상태":{select:{name:"확인 필요"}},"OCR 추출 결과":text(JSON.stringify(structured)),"OCR 모델 버전":text(extraction.parserVersion),"OCR 검증 결과":{select:{name:"미검증"}},"지출 유형":{select:{name:guessCategory(file,extraction)}},"업로드 메모":text(file.description??"")}
         if(payer){properties["지출자"]={people:[{id:payer}]};properties["카드 매칭 근거"]=text("사전 등록한 기명 카드 끝자리 일치. 사용자 확인 전 초안.")}
         if(extraction.cardLast4)properties["카드·계좌 끝 4자리"]=text(extraction.cardLast4)
+        if(options.cardClassification==="non_corporate"){
+          properties["결제 방식"]={select:{name:"기타"}}
+          properties["카드 매칭 근거"]=text("사용자가 이 거래의 결제 카드를 비법인카드로 명시함. 카드 끝자리 추론 아님. 개인 선지급·정산 대상 여부는 미확정.")
+        }
         match=await notion("pages","POST",{parent:{data_source_id:ledgerId},properties,children:reportBlocks(extraction,link,reason)})
         byKey.set(key,[match!]);ledger.push(match!)
       }
@@ -153,15 +161,19 @@ export async function syncDrive() {
       if(changed)for(const linked of record!.properties["연결 지출"]?.relation??[])await notion(`pages/${linked.id}`,"PATCH",{properties:{"검토 결과":{select:{name:"보완 필요"}},"자동 검토 사유":text("연결된 Drive 원본 내용이 변경되었습니다. 기존 판독·승인 근거와 재대조가 필요합니다.")}})
       await notion(`pages/${record!.id}`,"PATCH",{properties})
       record!.properties={...record!.properties,...properties};hashes.set(hash,record!)
-    } catch {
+    } catch (error) {
       failed++
+      // Log only status codes and our fixed error categories, never upstream bodies or receipt text.
+      const message=error instanceof Error?error.message:""
+      const status=message.match(/(?:HTTP |request failed: )(\d{3})/)?.[1]
+      console.error(status?`Receipt processing failed: HTTP ${status}`:"Receipt processing failed: verify OCR format and configuration")
       if(!record && !attemptedCreate)record=await notion("pages","POST",{parent:{data_source_id:inboxId},properties:{"파일명":{title:[{text:{content:file.name.slice(0,150)}}]},"Drive 파일 ID":text(file.id),"원본 링크":{url:link}}})
       if(record)await notion(`pages/${record.id}`,"PATCH",{properties:{"OCR 상태":{select:{name:"실패"}},"오류":text("파일 처리 실패: 연결 권한, Vision 설정, 파일 형식·크기를 확인하세요. 다음 실행에서 재시도합니다.")}})
     }
   }
   // No receipt data, file IDs, or OAuth secrets in cloud logs.
   let organized=0
-  if(process.env.DRIVE_ORGANIZE_ENABLED==="true"){
+  if(!options.fileId && process.env.DRIVE_ORGANIZE_ENABLED==="true"){
     const fresh=await rows(inboxId)
     const decoded=fresh.map(p=>{try{return {p,x:JSON.parse(value(p,"판독 JSON")) as Extraction}}catch{return null}}).filter((v):v is {p:Row;x:Extraction}=>v!==null)
     for(const file of files){
@@ -176,6 +188,6 @@ export async function syncDrive() {
       }catch{failed++}
     }
   }
-  const reviewed=await reviewPending(await rows(ledgerId))
+  const reviewed=options.skipReviews || options.fileId?0:await reviewPending(await rows(ledgerId))
   return {scanned:files.length,processed,failed,reviewed,organized}
 }

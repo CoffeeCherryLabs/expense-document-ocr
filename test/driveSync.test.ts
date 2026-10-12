@@ -12,7 +12,7 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
  globalThis.fetch=async(input,init)=>{
   const url=String(input),body=init?.body?JSON.parse(typeof init.body==="string"?init.body:"{}"):{}
   if(url.includes("oauth2.googleapis.com"))return json({access_token:"fake"})
-  if(url.includes("www.googleapis.com/drive/v3/files?"))return json({files:[{id:"file",name:"receipt.png",mimeType:"image/png",modifiedTime:modified,size:"8"}]})
+  if(url.includes("www.googleapis.com/drive/v3/files?"))return json({files:[{id:"file",name:"receipt.png",mimeType:"image/png",modifiedTime:modified,size:"8"},{id:"untouched",name:"other.png",mimeType:"image/png",modifiedTime:modified,size:"8"}]})
   if(url.includes("www.googleapis.com/drive/v3/files/file"))return new Response(bytes)
   if(url.includes("vision.googleapis.com"))return json({responses:[{fullTextAnnotation:{text:raw}}]})
   if(url.endsWith("/query")){const id=url.includes("/inbox/")?"inbox":"ledger";return json({results:pages.filter(p=>p.parent.data_source_id===id),has_more:false})}
@@ -21,11 +21,22 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   throw new Error("Unexpected mock request")
  }
  try {
-  assert.equal((await syncDrive()).failed,0)
+  await assert.rejects(syncDrive({cardClassification:"non_corporate"}),/requires one explicit file/)
+  await assert.rejects(syncDrive({fileId:"outside"}),/not in the configured Drive folder/)
+  assert.equal(pages.length,0)
+  process.env.DRIVE_ORGANIZE_ENABLED="true"
+  const first=await syncDrive({fileId:"file",cardClassification:"non_corporate"})
+  assert.deepEqual(first,{scanned:1,processed:1,failed:0,reviewed:0,organized:0})
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
-  assert.equal((await syncDrive()).processed,0)
+  const draft=pages.find(p=>p.parent.data_source_id==="ledger")
+  assert.equal(draft.properties["결제 방식"].select.name,"기타")
+  assert.equal(draft.properties["지출자"],undefined)
+  assert.match(draft.properties["카드 매칭 근거"].rich_text[0].text.content,/비법인카드/)
+  assert.equal((await syncDrive({fileId:"file"})).processed,0)
+  assert.equal((await syncDrive({fileId:"file",forceOcr:true})).processed,1)
+  assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
   modified="v2";bytes="image-v2"
-  assert.equal((await syncDrive()).failed,0)
+  assert.equal((await syncDrive({fileId:"file"})).failed,0)
   const expenses=pages.filter(p=>p.parent.data_source_id==="ledger")
   assert.equal(expenses.length,1)
   assert.equal(expenses[0].properties["검토 결과"].select.name,"보완 필요")
