@@ -1,9 +1,6 @@
 name: One receipt integration test
 on:
   workflow_dispatch:
-  push:
-    branches: ['codex/receipt-smoke']
-    paths: ['.github/workflows/one-receipt-test.yml']
 permissions:
   contents: read
 concurrency:
