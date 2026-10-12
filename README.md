@@ -76,6 +76,7 @@ Variables:
 - `EXPENSE_DATA_SOURCE_ID`: 법인 지출 관리대장 data source ID.
 - `EVIDENCE_DATA_SOURCE_ID`: 증빙 수신함 data source ID.
 - `DAILY_SUMMARY_DATA_SOURCE_ID`: 하루·사람별 원화 합계 자료. 스키마는 `docs/ACCOUNTING-WORKFLOW.md`를 참고하세요.
+- `DASHBOARD_SUMMARY_BLOCK_ID`: 전체 사용액·회계 완료액·미처리 건수 요약 콜아웃.
 - `KNOWN_CARD_DISPLAY_NAME`: 등록한 카드 소유자의 화면 표시 별칭(선택).
 - `EXPENSE_SYNC_ENABLED`: 초기에는 `false`. 수동 실행 및 회사 원본 1건의 생성/재실행/중복 방지/금액 충돌/사용자 확인 테스트 후 `true`로 활성화합니다.
 

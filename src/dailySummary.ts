@@ -1,6 +1,17 @@
 import {createHash} from "node:crypto"
 
 export type SummaryRow={id:string;properties:Record<string,any>}
+export function dashboardTotals(rows:SummaryRow[]) {
+  let total=0,completed=0,pending=0
+  for(const {properties:p} of rows){
+    if(p["통화"]?.select?.name!=="KRW" || p["처리 상태"]?.status?.name==="취소·반려")continue
+    const amount=p["총 금액"]?.number,valid=Number.isFinite(amount)?amount:0
+    total+=valid
+    if(p["처리 상태"]?.status?.name==="처리 완료")completed+=valid
+    else pending++
+  }
+  return {total,completed,pending}
+}
 export function businessDate(start:string|null|undefined):string|null {
   if(!start)return null
   const date=new Date(start)
@@ -16,7 +27,7 @@ export function dailyGroups(rows:SummaryRow[],aliases:Record<string,string>={}) 
     if(!date || !Number.isFinite(amount) || p["통화"]?.select?.name!=="KRW" || p["처리 상태"]?.status?.name==="취소·반려")continue
     const persons=p["지출자"]?.people??[],people=persons.map((v:any)=>String(v.id)).sort()
     const key="daily-v1:"+createHash("sha256").update(JSON.stringify([date,people,"KRW"])).digest("hex")
-    const name=persons.length?(persons.map((v:any)=>aliases[v.id]??v.name).filter(Boolean).join(", ") || p["지출자 표시"]?.formula?.string || "확인 필요"):"확인 필요"
+    const name=persons.length?(persons.map((v:any)=>aliases[v.id]??v.name).filter(Boolean).join(", ") || p["지출자 표시"]?.formula?.string || "미지정"):"미지정"
     const group:NonNullable<ReturnType<typeof groups.get>>=groups.get(key)??{key,date,people,name,amount:0,ids:[],payments:new Map<string,number>()}
     group.amount+=amount;group.ids.push(row.id)
     const method=p["결제 방식"]?.select?.name??"확인 필요"
@@ -24,7 +35,8 @@ export function dailyGroups(rows:SummaryRow[],aliases:Record<string,string>={}) 
     groups.set(key,group)
   }
   return [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key)).map(g=>({key:g.key,properties:{
-    "하루 사용":{title:[{text:{content:`${g.name} · ${g.amount.toLocaleString("ko-KR")}원`}}]},
+    "하루 사용":{title:[{text:{content:g.amount.toLocaleString("ko-KR")}}]},
+    "표시 이름":{rich_text:[{text:{content:g.name}}]},
     "사용일":{date:{start:g.date}},"지출자":{people:g.people.map(id=>({id}))},
     "하루 합계":{number:g.amount},"지출 건수":{number:g.ids.length},
     "연결 지출":{relation:g.ids.sort().map(id=>({id}))},

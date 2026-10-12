@@ -61,3 +61,32 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
  } finally {globalThis.fetch=oldFetch;for(const key of Object.keys(process.env))if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv)}
 })
+test("empty Drive still refreshes daily projections and unchanged runs create nothing",async()=>{
+ const oldFetch=globalThis.fetch,oldEnv={...process.env}
+ Object.assign(process.env,{NOTION_API_TOKEN:"test",GOOGLE_CLIENT_ID:"test",GOOGLE_CLIENT_SECRET:"test",GOOGLE_REFRESH_TOKEN:"test",GOOGLE_DRIVE_FOLDER_ID:"folder",EXPENSE_DATA_SOURCE_ID:"ledger",EVIDENCE_DATA_SOURCE_ID:"inbox",DAILY_SUMMARY_DATA_SOURCE_ID:"summary",DRIVE_ORGANIZE_ENABLED:"false"})
+ const ledger:any[]=[{id:"expense",properties:{"사용일":{date:{start:"2026-10-06"}},"통화":{select:{name:"KRW"}},"총 금액":{number:100},"지출자":{people:[{id:"person",name:"Employee"}]},"결제 방식":{select:{name:"법인카드"}},"처리 상태":{status:{name:"작성 중"}}}}]
+ const summaries:any[]=[];let creates=0,updates=0
+ const json=(x:unknown)=>new Response(JSON.stringify(x),{status:200})
+ globalThis.fetch=async(input,init)=>{
+  const url=String(input),body=init?.body?JSON.parse(typeof init.body==="string"?init.body:"{}"):{}
+  if(url.includes("oauth2.googleapis.com"))return json({access_token:"fake"})
+  if(url.includes("www.googleapis.com/drive/v3/files?"))return json({files:[]})
+  if(url.endsWith("/query"))return json({results:url.includes("/ledger/")?ledger:url.includes("/summary/")?summaries.filter(p=>!p.archived):[],has_more:false})
+  if(url.endsWith("/pages") && init?.method==="POST"){assert.equal(body.parent.data_source_id,"summary");creates++;const p={...body,id:"summary"+creates};summaries.push(p);return json(p)}
+  if(url.includes("/pages/") && init?.method==="PATCH"){
+   const p=[...ledger,...summaries].find(p=>p.id===url.split("/").pop());assert.ok(p)
+   if(p!==ledger[0])updates++
+   p.properties={...p.properties,...body.properties};if(body.archived)p.archived=true
+   return json(p)
+  }
+  throw new Error("Unexpected call: empty Drive must never download or OCR")
+ }
+ try{
+  const first=await syncDrive();assert.equal(first.scanned,0);assert.equal(first.processed,0);assert.equal(first.summaryGroups,1);assert.equal(creates,1)
+  assert.equal((await syncDrive()).summaryUpdated,0);assert.equal(creates,1)
+  ledger[0].properties["총 금액"].number=200
+  assert.equal((await syncDrive()).summaryUpdated,1);assert.equal(summaries[0].properties["하루 합계"].number,200);assert.equal(creates,1)
+  ledger[0].properties["처리 상태"].status.name="취소·반려"
+  assert.equal((await syncDrive()).summaryGroups,0);assert.equal(summaries[0].archived,true);assert.equal(ledger[0].archived,undefined);assert.equal(updates,2)
+ }finally{globalThis.fetch=oldFetch;for(const key of Object.keys(process.env))if(!(key in oldEnv))delete process.env[key];Object.assign(process.env,oldEnv)}
+})
