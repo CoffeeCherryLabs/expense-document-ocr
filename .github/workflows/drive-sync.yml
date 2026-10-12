@@ -2,7 +2,7 @@ name: Drive receipt intake
 on:
   workflow_dispatch:
   schedule:
-    - cron: '2,32 * * * *'
+    - cron: '13,43 * * * *'
 permissions:
   contents: read
 concurrency:
