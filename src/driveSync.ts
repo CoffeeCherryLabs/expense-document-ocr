@@ -224,7 +224,8 @@ export async function syncDrive(options:SyncOptions={}) {
   let summaryGroups=0,summaryUpdated=0
   const summaryId=process.env.DAILY_SUMMARY_DATA_SOURCE_ID
   if(!options.fileId && summaryId){
-    const existing=await rows(summaryId),groups=dailyGroups(freshLedger),keys=new Set(groups.map(g=>g.key))
+    const alias=process.env.KNOWN_CARD_DISPLAY_NAME,owner=process.env.KNOWN_CARD_USER_ID
+    const existing=await rows(summaryId),groups=dailyGroups(freshLedger,alias && owner?{[owner]:alias}: {}),keys=new Set(groups.map(g=>g.key))
     for(const group of groups){
       const matches=existing.filter(p=>value(p,"집계키")===group.key)
       if(matches.length>1)throw new Error("Duplicate daily summary keys: review projection")

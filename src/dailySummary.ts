@@ -9,14 +9,14 @@ export function businessDate(start:string|null|undefined):string|null {
   const p=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date)
   return ["year","month","day"].map(k=>p.find(v=>v.type===k)!.value).join("-")
 }
-export function dailyGroups(rows:SummaryRow[]) {
+export function dailyGroups(rows:SummaryRow[],aliases:Record<string,string>={}) {
   const groups=new Map<string,{key:string;date:string;people:string[];name:string;amount:number;ids:string[];payments:Map<string,number>}>()
   for(const row of rows){
     const p=row.properties,date=businessDate(p["사용일"]?.date?.start),amount=p["총 금액"]?.number
     if(!date || !Number.isFinite(amount) || p["통화"]?.select?.name!=="KRW" || p["처리 상태"]?.status?.name==="취소·반려")continue
     const persons=p["지출자"]?.people??[],people=persons.map((v:any)=>String(v.id)).sort()
     const key="daily-v1:"+createHash("sha256").update(JSON.stringify([date,people,"KRW"])).digest("hex")
-    const name=persons.length?(persons.map((v:any)=>v.name).filter(Boolean).join(", ") || p["지출자 표시"]?.formula?.string || "지출자 확인 필요"):"지출자 확인 필요"
+    const name=persons.length?(persons.map((v:any)=>aliases[v.id]??v.name).filter(Boolean).join(", ") || p["지출자 표시"]?.formula?.string || "확인 필요"):"확인 필요"
     const group:NonNullable<ReturnType<typeof groups.get>>=groups.get(key)??{key,date,people,name,amount:0,ids:[],payments:new Map<string,number>()}
     group.amount+=amount;group.ids.push(row.id)
     const method=p["결제 방식"]?.select?.name??"확인 필요"

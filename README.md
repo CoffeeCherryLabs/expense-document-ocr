@@ -75,6 +75,8 @@ Variables:
 - `GOOGLE_DRIVE_FOLDER_ID`: 영수증 폴더 ID.
 - `EXPENSE_DATA_SOURCE_ID`: 법인 지출 관리대장 data source ID.
 - `EVIDENCE_DATA_SOURCE_ID`: 증빙 수신함 data source ID.
+- `DAILY_SUMMARY_DATA_SOURCE_ID`: 하루·사람별 원화 합계 자료. 스키마는 `docs/ACCOUNTING-WORKFLOW.md`를 참고하세요.
+- `KNOWN_CARD_DISPLAY_NAME`: 등록한 카드 소유자의 화면 표시 별칭(선택).
 - `EXPENSE_SYNC_ENABLED`: 초기에는 `false`. 수동 실행 및 회사 원본 1건의 생성/재실행/중복 방지/금액 충돌/사용자 확인 테스트 후 `true`로 활성화합니다.
 
 `MAX_FILES_PER_RUN`은 기본 20개이며 전체 폴더 목록은 읽습니다. 증빙이 많아지면 Drive Changes API/큐 방식으로 이전해야 합니다. 여러 실행기를 동시에 켜면 Notion에 원자적 UNIQUE 제약이 없으므로 충돌 가능성이 있습니다. Actions concurrency 설정을 유지하고 다른 실행기와 동시 운영하지 마세요.

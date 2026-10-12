@@ -10,6 +10,7 @@ test("Daily projection aggregates transactions without splitting or guessing own
  assert.equal(known.properties["하루 합계"].number,300);assert.equal(known.properties["지출 건수"].number,2)
  assert.deepEqual(known.properties["연결 지출"].relation,[{id:"a"},{id:"b"}])
  assert.equal(dailyGroups([row("b",200),row("a",100)])[0].key,known.key)
+ assert.equal(dailyGroups([row("a",100)],{"person-a":"담당자"})[0].properties["하루 사용"].title[0].text.content,"담당자 · 100원")
  assert.match(result.find(g=>!g.properties["지출자"].people.length)!.properties["하루 사용"].title[0].text.content,/확인 필요/)
 })
 test("Projection comparison skips unchanged totals and refreshes corrected source values",()=>{
