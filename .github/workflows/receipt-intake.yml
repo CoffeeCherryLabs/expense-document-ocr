@@ -2,7 +2,7 @@ name: Receipt intake and reporting
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '13,43 * * * *'
 permissions:
   contents: read
 concurrency:
