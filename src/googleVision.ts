@@ -1,4 +1,26 @@
-type VisionResponse = { responses?: Array<{ fullTextAnnotation?: { text?: string }; textAnnotations?: Array<{ description?: string }>; error?: { message?: string } }> }
+type SpatialWord={description?:string;boundingPoly?:{vertices?:Array<{x?:number;y?:number}>}}
+type VisionResponse = { responses?: Array<{ fullTextAnnotation?: { text?: string }; textAnnotations?: SpatialWord[]; error?: { message?: string } }> }
+
+// Document OCR can emit the entire left column before the right column. Use
+// word positions to recover horizontal lines without guessing numeric values.
+export function spatialLines(annotations:SpatialWord[]):string {
+  const words=annotations.slice(1).flatMap(w=>{
+    const v=w.boundingPoly?.vertices
+    if(!w.description || !v || v.length<4)return []
+    const top=Math.min(...v.map(p=>p.y??0)),bottom=Math.max(...v.map(p=>p.y??0))
+    if(bottom<=top)return []
+    return [{text:w.description,x:Math.min(...v.map(p=>p.x??0)),top,bottom,center:(top+bottom)/2}]
+  }).sort((a,b)=>a.center-b.center)
+  const rows:Array<typeof words>=[]
+  for(const word of words){
+    const row=rows.find(r=>{
+      const anchor=r[0]
+      return Math.abs(anchor.center-word.center)<=Math.min(anchor.bottom-anchor.top,word.bottom-word.top)*0.45
+    })
+    if(row)row.push(word);else rows.push([word])
+  }
+  return rows.map(r=>r.sort((a,b)=>a.x-b.x).map(w=>w.text).join(" ")).join("\n")
+}
 
 export async function extractTextFromImage(imageBytes: Uint8Array): Promise<string> {
   const apiKey = process.env.GOOGLE_CLOUD_API_KEY
@@ -27,5 +49,6 @@ export async function extractTextFromImage(imageBytes: Uint8Array): Promise<stri
   if (first?.error?.message) throw new Error(`Google Vision error: ${first.error.message}`)
   const text = first?.fullTextAnnotation?.text ?? first?.textAnnotations?.[0]?.description ?? ""
   if (!text.trim()) throw new Error("No text detected in image")
-  return text
+  const spatial=spatialLines(first?.textAnnotations??[])
+  return spatial?`${text}\n--- spatial lines ---\n${spatial}`:text
 }

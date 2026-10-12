@@ -40,3 +40,4 @@ jobs:
 
 # Recheck after receipt label normalization.
 # Require a linked draft and retain bounded private amount diagnostics on failure.
+# Recover horizontally aligned values from Vision word geometry.
