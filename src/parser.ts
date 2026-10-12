@@ -1,6 +1,6 @@
 import type { DocumentType, Extraction } from "./types.js"
 
-export const PARSER_VERSION = "receipt-parser-v4"
+export const PARSER_VERSION = "receipt-parser-v5"
 const clean = (value: string) => value.replace(/\s+/g, " ").trim()
 const digits = (value: string) => Number(value.replace(/[^0-9.-]/g, ""))
 
@@ -82,7 +82,7 @@ export function parseOcrText(rawText: string): Extraction {
   const approvalNumber = labeledValue(lines, [/(?:승인\s*번호|승인\s*No\.?|approval\s*(?:no|number))\s*[:：#]?\s*([0-9][0-9 ]{5,11})(?![0-9a-z])/i])?.replace(/\s/g,"")
     ?? (/승인번호/.test(rawText) && lines.filter(l=>/^\d{8}$/.test(l)).length === 1 ? lines.find(l=>/^\d{8}$/.test(l))! : null)
   const businessNumber = labeledValue(lines, [/(?:사업자등록번호|사업자번호)\s*[:：]?\s*(\d{3}[- ]?\d{2}[- ]?\d{5})/i])?.replace(/\s/g, "") ?? null
-  const cardLast4 = lines.map(l=>l.replace(/\s/g,"").replace(/[‐‑–—]/g,"-").match(/(?:[\d*Xx]{4}-){3}(\d{4})(?!\d)/)?.[1]).find(Boolean) ?? null
+  const cardLast4 = lines.map(l=>l.replace(/\s/g,"").replace(/[‐‑–—_]/g,"-").match(/(?:[\d*Xx]{4}-){3}(\d{4})(?!\d)/)?.[1]).find(Boolean) ?? null
   const transactionDate = parseDate(rawText)
   const currency = /\bUSD\b/i.test(rawText) ? "USD" : /\bCNY\b|RMB/i.test(rawText) ? "CNY" : /\bJPY\b/i.test(rawText) ? "JPY" : /\bEUR\b|€/i.test(rawText) ? "EUR" : /\bKRW\b|원|₩|￦/i.test(rawText) || /사업자등록번호|부가세/.test(rawText) ? "KRW" : null
   const core = [merchant, transactionDate, totalAmount]

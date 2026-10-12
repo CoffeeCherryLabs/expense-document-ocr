@@ -46,3 +46,4 @@ jobs:
 # Recover horizontally aligned values from Vision word geometry.
 # Verify cached rerun keeps the single linked draft.
 # Diagnose masked card formatting without retaining any card digits.
+# Normalize underscores misread from card separators.
