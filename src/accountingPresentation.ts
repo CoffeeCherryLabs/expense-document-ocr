@@ -1,10 +1,10 @@
 import type { Extraction } from "./types.js"
 
 export function completionGuidance(category:string, registeredCard:boolean) {
-  const actions=["업무 목적과 재원(운영비/과제)을 입력하세요."]
-  if(category==="식비·회의비")actions.push("회의·식사는 참석자를 입력하세요.")
-  if(!registeredCard)actions.push("결제 수단과 지출자를 확인하세요.")
-  actions.push("원본 대조 후 사용자 확인을 체크하세요.")
+  const actions=["업무 목적·재원(운영비/과제) 입력."]
+  if(category==="식비·회의비")actions.push("회의·식사는 참석자 추가.")
+  if(!registeredCard)actions.push("결제 수단·지출자 확인.")
+  actions.push("원본 대조 후 사용자 확인.")
   return actions.join(" ")
 }
 
