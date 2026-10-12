@@ -237,11 +237,12 @@ export async function syncDrive(options:SyncOptions={}) {
     summaryGroups=groups.length
   }
   const dashboardBlockId=process.env.DASHBOARD_SUMMARY_BLOCK_ID
+  let dashboardUpdated=0
   if(!options.fileId && dashboardBlockId){
     const parent=await notion(`blocks/${dashboardBlockId}`),blocks=await notion(`blocks/${dashboardBlockId}/children`)
     const totals=dashboardTotals(freshLedger),format=(n:number)=>n.toLocaleString("ko-KR")
     const labels=[`전체 사용액 ${format(totals.total)}원`,`회계 처리 완료 ${format(totals.completed)}원 · 미처리 ${format(totals.pending)}건`]
-    for(const update of dashboardUpdates(parent,blocks.results,labels))await notion(`blocks/${update.id}`,"PATCH",update.body)
+    for(const update of dashboardUpdates(parent,blocks.results,labels)){await notion(`blocks/${update.id}`,"PATCH",update.body);dashboardUpdated++}
   }
-  return {scanned:files.length,processed,failed,reviewed,organized,...(!options.fileId && summaryId?{summaryGroups,summaryUpdated}: {}),...(options.fileId?{drafts,cardMatches,ownerMatches}: {})}
+  return {scanned:files.length,processed,failed,reviewed,organized,...(!options.fileId && summaryId?{summaryGroups,summaryUpdated}: {}),...(!options.fileId && dashboardBlockId?{dashboardUpdated}: {}),...(options.fileId?{drafts,cardMatches,ownerMatches}: {})}
 }
