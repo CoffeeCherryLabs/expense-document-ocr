@@ -26,14 +26,22 @@ test("cloud intake is idempotent and changed evidence invalidates preliminary re
   assert.equal(pages.length,0)
   process.env.DRIVE_ORGANIZE_ENABLED="true"
   const first=await syncDrive({fileId:"file",cardClassification:"non_corporate"})
-  assert.deepEqual(first,{scanned:1,processed:1,failed:0,reviewed:0,organized:0,drafts:1})
+  assert.deepEqual(first,{scanned:1,processed:1,failed:0,reviewed:0,organized:0,drafts:1,cardMatches:0,ownerMatches:0})
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
   const draft=pages.find(p=>p.parent.data_source_id==="ledger")
   assert.equal(draft.properties["결제 방식"].select.name,"기타")
   assert.equal(draft.properties["지출자"],undefined)
   assert.match(draft.properties["카드 매칭 근거"].rich_text[0].text.content,/비법인카드/)
   assert.equal((await syncDrive({fileId:"file"})).processed,0)
-  assert.equal((await syncDrive({fileId:"file",forceOcr:true})).processed,1)
+  const matched=await syncDrive({fileId:"file",forceOcr:true})
+  assert.equal(matched.processed,1)
+  assert.equal(matched.cardMatches,1)
+  assert.equal(matched.ownerMatches,0)
+  draft.properties["지출자"]={people:[{id:"user"}]}
+  assert.equal((await syncDrive({fileId:"file",forceOcr:true})).ownerMatches,1)
+  draft.properties["지출자"]={people:[{id:"another-user"}]}
+  assert.equal((await syncDrive({fileId:"file",forceOcr:true})).ownerMatches,0)
+  assert.equal(draft.properties["지출자"].people[0].id,"another-user")
   assert.equal(pages.filter(p=>p.parent.data_source_id==="ledger").length,1)
   modified="v2";bytes="image-v2"
   assert.equal((await syncDrive({fileId:"file"})).failed,0)

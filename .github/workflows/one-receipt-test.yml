@@ -1,6 +1,9 @@
 name: One receipt integration test
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/receipt-smoke']
+    paths: ['.github/workflows/one-receipt-test.yml']
 permissions:
   contents: read
 concurrency:
@@ -33,7 +36,7 @@ jobs:
           EVIDENCE_DATA_SOURCE_ID: ${{ vars.EVIDENCE_DATA_SOURCE_ID }}
           TEST_DRIVE_FILE_ID: ${{ secrets.TEST_DRIVE_FILE_ID }}
           TEST_CARD_CLASSIFICATION: ${{ secrets.TEST_CARD_CLASSIFICATION }}
-          TEST_FORCE_OCR: 'false'
+          TEST_FORCE_OCR: 'true'
           MAX_FILES_PER_RUN: '1'
           DRIVE_ORGANIZE_ENABLED: 'false'
 
