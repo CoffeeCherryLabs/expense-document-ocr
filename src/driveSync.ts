@@ -1,4 +1,3 @@
-import {organizeFile} from "./organizeDrive.js"
 import {createHash} from "node:crypto"
 import {parseOcrText} from "./parser.js"
 import {extractTextFromImage} from "./googleVision.js"
@@ -8,8 +7,8 @@ import {completionGuidance,draftBlocks,evidenceActions} from "./accountingPresen
 import {reportingProperties} from "./reporting.js"
 import {dailyGroups,summaryChanged,dashboardTotals,dashboardUpdates} from "./dailySummary.js"
 
-type Row = {id:string; properties:Record<string,any>}
-type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
+export type Row = {id:string; properties:Record<string,any>}
+export type DriveFile = {id:string;name:string;mimeType:string;modifiedTime:string;size?:string;description?:string;parents?:string[]}
 const text = (s:string) => ({rich_text:Array.from({length:Math.ceil(s.length/1900)},(_,i)=>({type:"text",text:{content:s.slice(i*1900,(i+1)*1900)}}))})
 const value = (p:Row,k:string):string => (p.properties[k]?.rich_text??[]).map((x:any)=>x.plain_text??x.text?.content??"").join("")
 const required = (name:string) => {const v=process.env[name];if(!v)throw new Error(`Missing setting: ${name}`);return v}
@@ -24,21 +23,21 @@ async function jsonRequest(url:string, init:RequestInit={}) {
     return r.json() as Promise<any>
   }
 }
-async function notion(path:string, method="GET", body?:unknown) {
+export async function notion(path:string, method="GET", body?:unknown) {
   await sleep(350)
   return jsonRequest("https://api.notion.com/v1/"+path,{method,headers:{Authorization:`Bearer ${required("NOTION_API_TOKEN")}`,"Notion-Version":"2025-09-03","Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)})
 }
-async function rows(id:string):Promise<Row[]> {
+export async function rows(id:string):Promise<Row[]> {
   const result:Row[]=[];let cursor:string|undefined
   do {const r=await notion(`data_sources/${id}/query`,"POST",{page_size:100,start_cursor:cursor});result.push(...r.results);cursor=r.has_more?r.next_cursor:undefined}while(cursor)
   return result
 }
-async function googleToken() {
+export async function googleToken() {
   const data=await jsonRequest("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:required("GOOGLE_CLIENT_ID"),client_secret:required("GOOGLE_CLIENT_SECRET"),refresh_token:required("GOOGLE_REFRESH_TOKEN"),grant_type:"refresh_token"})})
   if(!data.access_token)throw new Error("Google OAuth returned no access token")
   return String(data.access_token)
 }
-async function listFolder(token:string, folder:string, seen=new Set<string>()):Promise<DriveFile[]> {
+export async function listFolder(token:string, folder:string, seen=new Set<string>()):Promise<DriveFile[]> {
   if(!/^[\w-]+$/.test(folder))throw new Error("Invalid Drive folder ID")
   if(seen.has(folder))return [];seen.add(folder)
   const result:DriveFile[]=[];let pageToken:string|undefined
@@ -203,22 +202,7 @@ export async function syncDrive(options:SyncOptions={}) {
     }
   }
   // No receipt data, file IDs, or OAuth secrets in cloud logs.
-  let organized=0
-  if(!options.fileId && process.env.DRIVE_ORGANIZE_ENABLED==="true"){
-    const fresh=await rows(inboxId)
-    const decoded=fresh.map(p=>{try{return {p,x:JSON.parse(value(p,"판독 JSON")) as Extraction}}catch{return null}}).filter((v):v is {p:Row;x:Extraction}=>v!==null)
-    for(const file of files){
-      const item=decoded.find(v=>value(v.p,"Drive 파일 ID")===file.id)
-      if(!item || value(item.p,"Drive 수정시각")!==file.modifiedTime || value(item.p,"오류"))continue
-      const key=transactionKey(item.x)
-      // Require two different file contents with matching independently parsed transaction facts.
-      const corroborated=Boolean(key && decoded.some(v=>v.p.id!==item.p.id && value(v.p,"SHA256") && value(v.p,"SHA256")!==value(item.p,"SHA256") && !value(v.p,"오류") && transactionKey(v.x)===key))
-      try{
-        const result=await organizeFile({token,root:required("GOOGLE_DRIVE_FOLDER_ID"),inbox:required("GOOGLE_DRIVE_UPLOAD_FOLDER_ID"),file,extraction:item.x,corroborated,audit:async event=>{await notion(`blocks/${item.p.id}/children`,"PATCH",{children:[{object:"block",type:"paragraph",paragraph:{rich_text:[{type:"text",text:{content:"Drive 정리 이력: "+JSON.stringify(event)}}]}}]})}})
-        if(result.moved){organized++;await notion(`pages/${item.p.id}`,"PATCH",{properties:{"파일명":{title:[{text:{content:result.file.name}}]},"Drive 수정시각":text(result.file.modifiedTime)}})}
-      }catch{failed++}
-    }
-  }
+  const organized=0 // File organization belongs exclusively to the separate weekly job.
   const freshLedger=options.fileId?ledger:await rows(ledgerId)
   const reviewed=options.skipReviews || options.fileId?0:await reviewPending(freshLedger)
   let summaryGroups=0,summaryUpdated=0
