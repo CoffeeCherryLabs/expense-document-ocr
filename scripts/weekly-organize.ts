@@ -17,7 +17,7 @@ export async function weeklyOrganize(){
  const token=await googleToken(),files=await listFolder(token,root)
  const evidence=await rows(required("EVIDENCE_DATA_SOURCE_ID")),ledger=await rows(required("EXPENSE_DATA_SOURCE_ID"))
  const plan=organizationPlan(files,evidence,ledger,root,inbox)
- const journal=await notion("pages","POST",{parent:{page_id:report},properties:{title:{type:"title",title:rt(runKey)}},children:organizationReportBlocks(plan,0,"preview")})
+ const journal=await notion("pages","POST",{parent:{page_id:report},properties:{title:{type:"title",title:rt(runKey)}},children:organizationReportBlocks(plan,0,apply?"apply_pending":"preview")})
  let moved=0,failed=0
  if(apply)for(const item of plan.filter(p=>p.status==="eligible")){
   // Re-read confirmation and checkpoint immediately before each move. Do not overwrite human fields.

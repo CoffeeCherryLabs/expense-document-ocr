@@ -28,6 +28,7 @@ test("report separates file counts from transactions and explains zero eligibili
  const items=organizationPlan([file],[evidence],[expense],"root","inbox")
  assert.deepEqual(organizationCounts(items),{scanned:1,eligible:1,reference:0,needsCorrection:0,needsReview:0,alreadyFiled:0,untracked:0})
  const report=JSON.stringify(organizationReportBlocks([],0,"preview"));assert.match(report,/현재 이동 대상이 없습니다/);assert.match(report,/지출 건수/)
+ const applying=JSON.stringify(organizationReportBlocks(items,0,"apply_pending"));assert.match(applying,/실행 전 대상 목록/);assert.match(applying,/실제 이동 결과는 아래/);assert.doesNotMatch(applying,/이동 전 미리보기|실제 이동 0개/)
 })
 test("weekly preview never downloads, OCRs, moves files or changes source rows",async()=>{
  const oldFetch=globalThis.fetch,oldEnv={...process.env};let journals=0
