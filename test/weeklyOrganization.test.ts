@@ -32,6 +32,8 @@ test("report separates file counts from transactions and explains zero eligibili
 })
 test("weekly preview never downloads, OCRs, moves files or changes source rows",async()=>{
  const oldFetch=globalThis.fetch,oldEnv={...process.env};let journals=0
+ // Fixture execution must not append synthetic counts to the real Actions report.
+ delete process.env.GITHUB_STEP_SUMMARY
  Object.assign(process.env,{GOOGLE_DRIVE_FOLDER_ID:"root",GOOGLE_DRIVE_UPLOAD_FOLDER_ID:"inbox",WEEKLY_ORGANIZATION_REPORT_PAGE_ID:"report",EVIDENCE_DATA_SOURCE_ID:"evidence",EXPENSE_DATA_SOURCE_ID:"ledger",NOTION_API_TOKEN:"test",GOOGLE_CLIENT_ID:"test",GOOGLE_CLIENT_SECRET:"test",GOOGLE_REFRESH_TOKEN:"test",GITHUB_RUN_ID:"123",WEEKLY_DRIVE_APPLY_ENABLED:"false"})
  const json=(x:unknown)=>new Response(JSON.stringify(x),{status:200})
  globalThis.fetch=async(input,init)=>{
